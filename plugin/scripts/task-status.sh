@@ -18,10 +18,16 @@ RESUME_MODE="$(ar_task_get "$WS" resume_mode)"
 RESUME_COUNT="$(ar_task_get "$WS" resume_count)"
 MAX_RESUMES="$(ar_task_get "$WS" max_resumes)"
 PROMPT="$(ar_task_get "$WS" original_prompt)"
+SESSION_ID="$(ar_task_get "$WS" session_id)"
 
 echo "Task in $WS"
 echo "  status     : $STATUS"
 echo "  importance : $IMPORTANCE"
+if [ -n "$SESSION_ID" ]; then
+  echo "  session    : $(printf '%.8s' "$SESSION_ID") (resume continues this conversation)"
+else
+  echo "  session    : none pinned — resume starts a NEW chat (see: claude-auto-resume sessions)"
+fi
 echo "  resumes    : ${RESUME_COUNT:-0} of ${MAX_RESUMES:-3}"
 if [ "$RESUME_MODE" = "auto" ]; then
   echo "  resume     : auto-detect (probing; next probe: ${RESUME_AT:-soon})"

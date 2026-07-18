@@ -88,6 +88,63 @@ function refreshAll() {
   dashboard.update(host);
 }
 
+// ------------------------------------------------------- session listing --
+// Claude Code stores one JSONL per session at
+// ~/.claude/projects/<encoded-cwd>/<session-uuid>.jsonl (HOOK-FINDINGS F2).
+// Read-only here; the pick is executed by the CLI (`resume-at --session`).
+
+const PROJECTS_DIR = path.join(os.homedir(), '.claude', 'projects');
+const UUID_RE = /^[0-9a-fA-F-]{32,40}$/;
+
+function sessionSummary(file) {
+  let fd;
+  try {
+    fd = fs.openSync(file, 'r');
+    const buf = Buffer.alloc(32768);
+    const n = fs.readSync(fd, buf, 0, buf.length, 0);
+    for (const line of buf.toString('utf8', 0, n).split('\n')) {
+      let o;
+      try {
+        o = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (o.type !== 'user' || o.isMeta) continue;
+      let c = o.message && o.message.content;
+      if (Array.isArray(c))
+        c = c.filter((b) => b.type === 'text').map((b) => b.text).join(' ');
+      if (typeof c !== 'string') continue;
+      c = c.replace(/\s+/g, ' ').trim();
+      if (!c || c.startsWith('<command-') || c.startsWith('<local-command')) continue;
+      return c.slice(0, 90);
+    }
+  } catch {
+    /* unreadable */
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+  }
+  return '';
+}
+
+function listSessions(ws) {
+  if (!ws) return [];
+  const dir = path.join(PROJECTS_DIR, ws.replace(/[^A-Za-z0-9]/g, '-'));
+  try {
+    return fs
+      .readdirSync(dir)
+      .filter((f) => f.endsWith('.jsonl') && UUID_RE.test(f.slice(0, -6)))
+      .map((f) => {
+        const st = fs.statSync(path.join(dir, f));
+        return { id: f.slice(0, -6), mtime: st.mtimeMs, sizeKb: Math.round(st.size / 1024) };
+      })
+      .sort((a, b) => b.mtime - a.mtime)
+      .slice(0, 6)
+      .map((s) => ({ ...s, summary: sessionSummary(path.join(dir, `${s.id}.jsonl`)) }));
+  } catch {
+    return [];
+  }
+}
+
 // -------------------------------------------------------- dashboard state --
 
 let cliFoundCache = { at: 0, value: true };
@@ -151,9 +208,11 @@ function collectState() {
   } catch {
     /* ignore */
   }
+  const currentWs = workspacePath();
   return {
     tasks: readAllTasks(),
-    currentWs: workspacePath(),
+    currentWs,
+    sessions: listSessions(currentWs),
     cliFound: cliFoundCache.value,
     hooksVia,
     daemons,
@@ -162,9 +221,10 @@ function collectState() {
 
 const host = {
   collectState,
-  schedule: async (ws, when, tier) => {
+  schedule: async (ws, when, tier, session) => {
     const args = ['resume-at', when || 'auto'];
     if (tier) args.push(tier);
+    if (session) args.push('--session', session);
     const res = await runCli(args, ws);
     if (res.notFound) return offerInstall();
     if (res.code !== 0)

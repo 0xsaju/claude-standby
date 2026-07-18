@@ -2,7 +2,7 @@
 
 Living checklist for claude-auto-resume. Update before ending any working
 session. Detailed rationale for every decision: `docs/DECISIONS.md`
-(D1–D22). All dates 2026-07-18 unless noted.
+(D1–D23). All dates 2026-07-18 unless noted.
 
 ## Done
 
@@ -30,8 +30,17 @@ session. Detailed rationale for every decision: `docs/DECISIONS.md`
 - [x] **VS Code cockpit MVP.** Plain-JS extension: status bar over
       state.json, quick-pick actions through the CLI, install onboarding.
       Runs from source; unpublished. (D21)
-- [x] **Test suite: 200 green** — three JSON engines, daemon lifecycle,
-      auto mode, hooks setup/removal, installer cycle, CLI surface.
+- [x] **True session resume (the primary goal).** Resumes now continue
+      the interrupted conversation via `claude --resume <session-id>`,
+      not a new chat. Session store + resume flags measured
+      (HOOK-FINDINGS F2/F3); `sessions` command lists a workspace's
+      sessions; `resume-at` pins the newest by default with
+      `--session <n|id|latest|new>` override; cockpit shows one-click
+      session plates in the composer. Plugin 0.3.0, extension 0.5.0.
+      (D23)
+- [x] **Test suite: 219 green** — three JSON engines, daemon lifecycle,
+      auto mode, session discovery/pinning, hooks setup/removal,
+      installer cycle, CLI surface.
 
 ## Next
 
@@ -39,7 +48,11 @@ session. Detailed rationale for every decision: `docs/DECISIONS.md`
       `logs/hook-payloads.log`): paste findings into
       `docs/HOOK-FINDINGS.md` → unblocks Phase 1
 - [ ] **Phase 1 — Hook detection:** real `detect_limit()` in on-stop.sh,
-      session_id capture (D6) → true `--resume`, zero-typing scheduling
+      hook-payload session_id capture (D6) → zero-typing scheduling
+      (session resume itself already works via F2 store discovery)
+- [ ] **Real-limit verification of `--resume`:** on the next limit hit,
+      schedule with a pinned session and confirm the conversation
+      actually continues (C6 milestone burn)
 - [ ] **Phase 3 — Polish:** stuck detection (PROGRESS.md unchanged across
       two resumes), resume-verification fallback prompt, `/warmup`
       scheduler, reboot-surviving schedules (launchd/cron one-shots)
@@ -52,11 +65,16 @@ session. Detailed rationale for every decision: `docs/DECISIONS.md`
 
 ## Handoff note
 
-The tool is complete for its manual and semi-automatic flows and is
-installable by anyone (`curl … | install.sh | bash`); 200 tests green.
-Everything that remains is either blocked on real limit-hit data (Phase 1
-detection — the hooks are already capturing) or explicitly deferred
-(Windows, marketplace publishing, Phase 3 polish). All state manipulation
-goes through lib.sh's public API; detection code may only match formats
-documented in docs/HOOK-FINDINGS.md (C1). Keep docs/USER-GUIDE.md in sync
-with any behavior change, and keep the VS Code extension a thin shell.
+The primary goal now actually works: a scheduled resume continues the
+user's interrupted conversation (`claude --resume <pinned session id>`),
+with the id pinned at schedule time — never resolved later, because the
+daemon's own probes create session files that would poison any
+"most recent" lookup (D23; this is also why `--continue` is never used).
+Session discovery reads the measured store layout (HOOK-FINDINGS F2)
+read-only; picks flow through `resume-at --session` in both CLI and
+cockpit. 219 tests green. Still pending: verify `--resume` against a real
+limit once one hits (C6), plus everything blocked on hook-payload data.
+All state manipulation goes through lib.sh's public API; detection code
+may only match formats documented in docs/HOOK-FINDINGS.md (C1). Keep
+docs/USER-GUIDE.md in sync with any behavior change, and keep the VS Code
+extension a thin shell.

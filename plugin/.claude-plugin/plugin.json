@@ -1,5 +1,5 @@
 {
   "name": "claude-auto-resume",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Makes Claude Code tasks survive rate-limit hits: detects the limit, waits until reset, and auto-resumes the session with proper context, graded by task importance."
 }

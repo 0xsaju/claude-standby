@@ -138,9 +138,24 @@ Output:
 Resume scheduled.
   workspace  : /Users/you/myproject
   resume at  : auto-detect (probing every 30 min until the limit lifts)
+  session    : 612fb08b — the original conversation continues (claude --resume)
   importance : critical
   daemon     : running detached, wakes every 60s
 ```
+
+Note the `session` line: the resume **continues the conversation that got
+interrupted**, via `claude --resume <session-id>` — it does not open a new
+chat. By default the workspace's most recent session is pinned. To pick a
+different one:
+
+```text
+claude-auto-resume sessions          # numbered list, newest first
+claude-auto-resume resume-at auto --session 2
+```
+
+`--session` also accepts a session id (or unique prefix), `latest`, or
+`new` (deliberately start a fresh chat). The id is pinned at schedule
+time, so the daemon's own probe calls can never hijack "most recent".
 
 You can close the terminal. The daemon makes one minimal, near-free `haiku`
 probe call; while limited, that call returns the limit message — whose
@@ -203,7 +218,7 @@ task to `waiting` and the journal keeps the full history.
 
 ## 5. Command reference
 
-### `claude-auto-resume resume-at [when] [critical|normal|low]`
+### `claude-auto-resume resume-at [when] [critical|normal|low] [--session <n|id|latest|new>]`
 
 Schedules an auto-resume for the current workspace and spawns the daemon.
 With no `when` (or `auto`), the daemon probes until the limit lifts and
@@ -211,6 +226,20 @@ resumes then; with a time, it resumes at that time. Creates the task if the
 workspace wasn't tracked (default tier `critical`); otherwise keeps the
 existing tier unless you pass one. Re-running it reschedules — the running
 daemon picks up the change within one tick.
+
+Pins which Claude Code conversation the resume continues: by default the
+workspace's newest session (a previously pinned session is kept on
+reschedule). `--session` overrides — an index from
+`claude-auto-resume sessions`, a session id or unique prefix, `latest`, or `new`
+for a fresh chat. An unknown value refuses rather than silently starting
+a new conversation.
+
+### `claude-auto-resume sessions`
+
+Lists the current workspace's Claude Code sessions (from
+`~/.claude/projects/`), newest first: pick index, short id, age, size, and
+the first real prompt as a summary. Marks the session currently pinned
+for resume.
 
 ### `claude-auto-resume start <critical|normal|low> <task description>`
 

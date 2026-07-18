@@ -39,6 +39,7 @@ const EVENT_ICON = {
   failed: '❌',
   cancelled: '⃠',
   'task-started': '🏁',
+  'session-pinned': '📌',
 };
 
 let panel; // singleton tab panel
@@ -56,7 +57,7 @@ function attach(webview, host) {
   return webview.onDidReceiveMessage(async (msg) => {
     switch (msg.type) {
       case 'schedule':
-        await host.schedule(msg.ws, msg.when, msg.tier);
+        await host.schedule(msg.ws, msg.when, msg.tier, msg.session);
         break;
       case 'cancel':
         await host.cancel(msg.ws);
@@ -137,9 +138,43 @@ function progressBar(used, max) {
     <div class="meter-label">${used} of ${max} resume attempts used</div>`;
 }
 
-function scheduleForm(ws, compact) {
+function ago(ms) {
+  const d = Math.max(0, Math.floor((Date.now() - ms) / 1000));
+  if (d < 3600) return `${Math.floor(d / 60)}m ago`;
+  if (d < 86400) return `${Math.floor(d / 3600)}h ago`;
+  return `${Math.floor(d / 86400)}d ago`;
+}
+
+// Session plates: pick WHICH conversation the daemon resumes with
+// `claude --resume <id>` (the whole point of the tool). Only rendered for
+// the current workspace — other workspaces default to their newest session.
+function sessionPlates(state, ws, task) {
+  if (ws !== state.currentWs || !(state.sessions || []).length) return '';
+  const pinned = task && task.session_id;
+  const pinnedListed = state.sessions.some((s) => s.id === pinned);
+  const plates = state.sessions
+    .map((s, i) => {
+      const selected = pinned ? s.id === pinned : i === 0;
+      return `<button class="plate ${selected ? 'selected' : ''}" data-session="${esc(s.id)}">
+        <span class="plate-title">${esc(s.summary || s.id.slice(0, 8))}</span>
+        <span class="plate-meta">${esc(s.id.slice(0, 8))} · ${esc(ago(s.mtime))} · ${s.sizeKb} KB</span>
+      </button>`;
+    })
+    .join('');
+  return `<div class="plates">
+    <div class="plates-label">Continue which conversation?</div>
+    ${plates}
+    <button class="plate plate-new ${pinned && !pinnedListed ? '' : ''}" data-session="new">
+      <span class="plate-title">New chat</span>
+      <span class="plate-meta">start fresh instead of resuming</span>
+    </button>
+  </div>`;
+}
+
+function scheduleForm(ws, compact, state, task) {
   return `
   <div class="composer ${compact ? 'compact' : ''}" data-ws="${esc(ws)}">
+    ${sessionPlates(state, ws, task)}
     <div class="presets">
       <button class="preset" data-when="auto" title="Probe until the limit lifts, then resume">Auto-detect</button>
       <button class="preset" data-when="30m">30m</button>
@@ -174,7 +209,7 @@ function heroCard(ws, task, state) {
       <h2>Nothing tracked here yet</h2>
       <p class="ws-path">${esc(ws)}</p>
       <p>Hit a usage limit? Schedule a resume and walk away.</p>
-      ${scheduleForm(ws, false)}
+      ${scheduleForm(ws, false, state)}
     </section>`;
   }
   const color = STATUS_COLOR[task.status] || 'var(--vscode-foreground)';
@@ -193,6 +228,14 @@ function heroCard(ws, task, state) {
   } else if (task.status === 'resuming') {
     timing = `<div class="countdown"><span class="count pulse">● session running</span></div>`;
   }
+  const pinnedInfo = (state.sessions || []).find((s) => s.id === task.session_id);
+  const sessionLine = task.session_id
+    ? `<div class="session-line" title="${esc(task.session_id)}">↻ continues “${esc(
+        (pinnedInfo && pinnedInfo.summary) || task.session_id.slice(0, 8)
+      )}” <span class="session-id">${esc(task.session_id.slice(0, 8))}</span></div>`
+    : active
+      ? `<div class="session-line warn">⚠ no session pinned — resume would start a new chat (pick one below)</div>`
+      : '';
   return `<section class="card hero">
     <div class="hero-top">
       <div>
@@ -208,6 +251,7 @@ function heroCard(ws, task, state) {
             ? `<div class="prompt">“${esc(task.original_prompt.slice(0, 140))}”</div>`
             : ''
         }
+        ${sessionLine}
       </div>
       <div class="hero-actions">
         <button class="primary act-schedule" data-ws="${esc(ws)}">${
@@ -222,7 +266,7 @@ function heroCard(ws, task, state) {
     </div>
     ${timing}
     ${progressBar(task.resume_count ?? 0, task.max_resumes ?? 3)}
-    <div class="composer-slot" data-ws="${esc(ws)}" hidden>${scheduleForm(ws, true)}</div>
+    <div class="composer-slot" data-ws="${esc(ws)}" hidden>${scheduleForm(ws, true, state, task)}</div>
   </section>`;
 }
 
@@ -250,7 +294,7 @@ function otherCards(state) {
           <button class="linklike act-schedule" data-ws="${esc(ws)}">schedule</button>
           ${active ? `<button class="linklike danger-text act-cancel" data-ws="${esc(ws)}">cancel</button>` : ''}
         </div>
-        <div class="composer-slot" data-ws="${esc(ws)}" hidden>${scheduleForm(ws, true)}</div>
+        <div class="composer-slot" data-ws="${esc(ws)}" hidden>${scheduleForm(ws, true, state, t)}</div>
       </div>`;
     })
     .join('');
@@ -372,6 +416,26 @@ function render(state, opts) {
   .empty-icon { font-size: 34px; margin-bottom: 6px; }
   .hero.empty h2 { margin: 4px 0 6px; font-size: 16px; }
   .hero.empty p { margin: 4px 0; font-size: 12.5px; color: var(--vscode-descriptionForeground); }
+  .session-line { font-size: 12px; margin-top: 8px; color: var(--vscode-descriptionForeground); }
+  .session-line.warn { color: var(--vscode-charts-orange); }
+  .session-id { font-family: var(--vscode-editor-font-family, monospace); font-size: 10.5px; opacity: .8; margin-left: 4px; }
+  .plates { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+  .plates-label { font-size: 11px; text-transform: uppercase; letter-spacing: .6px; color: var(--vscode-descriptionForeground); margin-bottom: 2px; }
+  .plate {
+    display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+    text-align: left; padding: 8px 12px; border-radius: 8px;
+    background: var(--vscode-input-background);
+    border: 1px solid var(--vscode-widget-border, rgba(128,128,128,.25));
+    color: var(--vscode-foreground);
+  }
+  .plate:hover { border-color: #F59E0B; filter: none; }
+  .plate.selected {
+    border-color: #F59E0B;
+    background: color-mix(in srgb, #F59E0B 10%, var(--vscode-input-background));
+  }
+  .plate.selected .plate-title::before { content: '● '; color: #F59E0B; }
+  .plate-title { font-size: 12.5px; font-weight: 600; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .plate-meta { font-size: 10.5px; color: var(--vscode-descriptionForeground); font-variant-numeric: tabular-nums; }
   .composer { margin-top: 16px; text-align: left; }
   .presets { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
   .preset { padding: 5px 12px; border-radius: 99px; font-size: 12px; }
@@ -471,9 +535,17 @@ function render(state, opts) {
   );
   $$('.composer').forEach((c) => {
     const ws = c.dataset.ws;
+    $$('.plate', c).forEach((p) =>
+      p.addEventListener('click', () => {
+        $$('.plate', c).forEach((x) => x.classList.remove('selected'));
+        p.classList.add('selected');
+      })
+    );
     const send = (when) => {
       const tier = $('.tier', c).value;
-      vscode.postMessage({ type: 'schedule', ws, when, tier });
+      const plate = $('.plate.selected', c);
+      const session = plate ? plate.dataset.session : undefined;
+      vscode.postMessage({ type: 'schedule', ws, when, tier, session });
     };
     $$('.preset', c).forEach((p) => p.addEventListener('click', () => send(p.dataset.when)));
     $('.go', c).addEventListener('click', () => {

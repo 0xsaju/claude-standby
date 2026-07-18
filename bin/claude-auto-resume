@@ -8,7 +8,11 @@
 # Usage:
 #   claude-auto-resume [status]                     show this workspace's task
 #   claude-auto-resume start <tier> <description>   track this workspace
-#   claude-auto-resume resume-at [when] [tier]      schedule resume (default: auto)
+#   claude-auto-resume resume-at [when] [tier] [--session <n|id|latest|new>]
+#                                                   schedule resume (default: auto,
+#                                                   continuing the newest session)
+#   claude-auto-resume sessions                     list this workspace's Claude
+#                                                   sessions (pick one to resume)
 #   claude-auto-resume cancel                       cancel tracking
 #   claude-auto-resume list                         all tracked workspaces
 #   claude-auto-resume log [n]                      last n log lines (default 40)
@@ -72,6 +76,9 @@ case "$CMD" in
 
   resume-at|resume)
     exec bash "$SCRIPTS_DIR/task-resume-at.sh" "$@" ;;
+
+  sessions)
+    exec bash "$SCRIPTS_DIR/task-sessions.sh" "$@" ;;
 
   cancel)
     exec bash "$SCRIPTS_DIR/task-cancel.sh" ;;

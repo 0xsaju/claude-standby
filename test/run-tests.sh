@@ -284,6 +284,7 @@ DTMP="$(cd "$DTMP" && pwd)"   # normalize: workspace keys come from pwd
 export CLAUDE_AUTO_RESUME_STATE="$DTMP/state.json"
 export CLAUDE_AUTO_RESUME_LOG_DIR="$DTMP/logs"
 export CLAUDE_AUTO_RESUME_CLAUDE_BIN="$HERE/fake-claude.sh"
+export CLAUDE_PROJECTS_DIR="$DTMP/projects"   # hermetic: no real session store
 export FAKE_CLAUDE_TRANSCRIPT_DIR="$DTMP/transcripts"
 export FAKE_CLAUDE_RUN_SECS=0
 export FAKE_CLAUDE_MODE=clean
@@ -458,6 +459,99 @@ fi
 unset CLAUDE_AUTO_RESUME_CLAUDE_BIN FAKE_CLAUDE_TRANSCRIPT_DIR FAKE_CLAUDE_MODE
 rm -rf "$DTMP"
 
+# ------------------------------------------------------ session selection --
+# Session discovery + pinning against a fixture store in the MEASURED
+# layout (HOOK-FINDINGS F2): projects/<encoded-ws>/<uuid>.jsonl
+
+SETMP="$(mktemp -d "${TMPDIR:-/tmp}/ar-test-XXXXXX")"
+SETMP="$(cd "$SETMP" && pwd)"
+export CLAUDE_AUTO_RESUME_STATE="$SETMP/state.json"
+export CLAUDE_AUTO_RESUME_LOG_DIR="$SETMP/logs"
+export CLAUDE_PROJECTS_DIR="$SETMP/projects"
+export CLAUDE_AUTO_RESUME_CLAUDE_BIN="$HERE/fake-claude.sh"
+export FAKE_CLAUDE_TRANSCRIPT_DIR="$SETMP/transcripts"
+export FAKE_CLAUDE_RUN_SECS=0
+export FAKE_CLAUDE_MODE=clean
+export AR_DAEMON_TICK_SECS=1
+export AR_NOTIFY_SILENT=1
+unset AR_JSON_ENGINE
+. "$PLUGIN/scripts/lib.sh"
+
+SWS="$SETMP/ws-sessions"; mkdir -p "$SWS"
+SPDIR="$(ar_project_dir "$SWS")"
+t_eq "sessions: project dir encoding" \
+  "$SETMP/projects/$(printf '%s' "$SWS" | sed 's/[^A-Za-z0-9]/-/g')" "$SPDIR"
+
+mkdir -p "$SPDIR/memory"
+OLD_ID="aaaaaaaa-1111-2222-3333-444444444444"
+NEW_ID="bbbbbbbb-5555-6666-7777-888888888888"
+# older session: string content (F2 sample shape)
+printf '%s\n' \
+  '{"type":"user","message":{"role":"user","content":"Fix the login bug in auth.js"},"sessionId":"'"$OLD_ID"'","timestamp":"2026-07-18T10:00:00.000Z"}' \
+  > "$SPDIR/$OLD_ID.jsonl"
+# newer session: command line first (must be skipped), then array content
+printf '%s\n' \
+  '{"type":"user","message":{"role":"user","content":"<command-message>x</command-message>\n<command-name>/x</command-name>"},"sessionId":"'"$NEW_ID"'"}' \
+  '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Migrate the database schema to v2"}]},"sessionId":"'"$NEW_ID"'"}' \
+  > "$SPDIR/$NEW_ID.jsonl"
+echo '{"not":"a session"}' > "$SPDIR/notes.jsonl"
+touch -t 202607181000 "$SPDIR/$OLD_ID.jsonl"
+
+SLIST="$(ar_sessions_list "$SWS")"
+t_eq "sessions: uuid files only, both found" "2" "$(printf '%s\n' "$SLIST" | grep -c .)"
+t_eq "sessions: newest first" "$NEW_ID" "$(printf '%s\n' "$SLIST" | head -1 | cut -f1)"
+t_eq "sessions: latest helper" "$NEW_ID" "$(ar_session_latest "$SWS")"
+if command -v python3 >/dev/null 2>&1; then
+  t_contains "sessions: summary skips command lines" "Migrate the database" \
+    "$(printf '%s\n' "$SLIST" | head -1 | cut -f4)"
+fi
+
+SOUT="$(cd "$SWS" && bash "$PLUGIN/scripts/task-sessions.sh")"
+t_contains "sessions cmd: lists newest id" "bbbbbbbb" "$SOUT"
+t_contains "sessions cmd: hints at pinning" "resume-at" "$SOUT"
+
+# scheduling with no --session pins the newest session automatically
+(cd "$SWS" && AR_NO_DAEMON=1 bash "$PLUGIN/scripts/task-resume-at.sh" now >/dev/null)
+t_eq "pin: default pins latest session" "$NEW_ID" "$(ar_task_get "$SWS" session_id)"
+t_contains "pin: journaled" "session-pinned" "$(ar_journal_show "$SWS" 5)"
+
+# --session <index> picks from the numbered list; prefix works too
+(cd "$SWS" && AR_NO_DAEMON=1 bash "$PLUGIN/scripts/task-resume-at.sh" now --session 2 >/dev/null)
+t_eq "pin: --session index" "$OLD_ID" "$(ar_task_get "$SWS" session_id)"
+(cd "$SWS" && AR_NO_DAEMON=1 bash "$PLUGIN/scripts/task-resume-at.sh" now --session bbbbbbbb >/dev/null)
+t_eq "pin: --session id prefix" "$NEW_ID" "$(ar_task_get "$SWS" session_id)"
+
+# --session new explicitly starts a fresh chat
+SOUT="$(cd "$SWS" && AR_NO_DAEMON=1 bash "$PLUGIN/scripts/task-resume-at.sh" now --session new)"
+t_eq "pin: --session new clears" "" "$(ar_task_get "$SWS" session_id)"
+t_contains "pin: new chat confirmed" "new chat" "$SOUT"
+
+# a pinned session survives rescheduling (no silent re-pin to latest)
+ar_task_set "$SWS" session_id "$OLD_ID"
+(cd "$SWS" && AR_NO_DAEMON=1 bash "$PLUGIN/scripts/task-resume-at.sh" 45m >/dev/null)
+t_eq "pin: reschedule keeps existing pin" "$OLD_ID" "$(ar_task_get "$SWS" session_id)"
+
+# unknown --session refuses instead of silently starting a new chat
+SOUT="$(cd "$SWS" && AR_NO_DAEMON=1 bash "$PLUGIN/scripts/task-resume-at.sh" now --session 99)"
+t_contains "pin: bad --session refused" "No session matches" "$SOUT"
+
+# the daemon resumes THE PINNED SESSION: fake-claude appends to
+# <session_id>.jsonl when called with --resume (its transcript is keyed
+# by the resume id), so that file proves --resume was passed through.
+(cd "$SWS" && AR_NO_DAEMON=1 bash "$PLUGIN/scripts/task-resume-at.sh" now --session 1 >/dev/null)
+bash "$PLUGIN/scripts/daemon.sh" "$SWS"
+t_eq "daemon: resume continues pinned session" "done" "$(ar_task_get "$SWS" status)"
+if [ -f "$SETMP/transcripts/$NEW_ID.jsonl" ]; then
+  ok "daemon: claude called with --resume <pinned id>"
+else
+  fail "daemon: claude called with --resume <pinned id>" \
+    "$(ls "$SETMP/transcripts" 2>/dev/null)"
+fi
+t_contains "daemon: journal names the session" "bbbbbbbb" "$(ar_journal_show "$SWS" 10)"
+
+unset CLAUDE_AUTO_RESUME_CLAUDE_BIN CLAUDE_PROJECTS_DIR FAKE_CLAUDE_TRANSCRIPT_DIR FAKE_CLAUDE_MODE
+rm -rf "$SETMP"
+
 # -------------------------------------------------------------- cli wrapper --
 
 CTMP="$(mktemp -d "${TMPDIR:-/tmp}/ar-test-XXXXXX")"
@@ -545,8 +639,10 @@ else
   printf 'skip - hook setup tests need python3\n'
 fi
 
-t_contains "cli: version" "claude-auto-resume 0.2.0" "$(bash "$CLI" version)"
-t_contains "cli: --version flag" "claude-auto-resume 0.2.0" "$(bash "$CLI" --version)"
+# version comes from the plugin manifest — read it, don't hardcode it
+MANIFEST_VER="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$HERE/../plugin/.claude-plugin/plugin.json" | head -1)"
+t_contains "cli: version" "claude-auto-resume $MANIFEST_VER" "$(bash "$CLI" version)"
+t_contains "cli: --version flag" "claude-auto-resume $MANIFEST_VER" "$(bash "$CLI" --version)"
 DOUT="$(CLAUDE_AUTO_RESUME_CLAUDE_BIN="$HERE/fake-claude.sh" bash "$CLI" doctor)"
 DRC=$?
 t_eq "cli: doctor exits 0 when healthy" "0" "$DRC"

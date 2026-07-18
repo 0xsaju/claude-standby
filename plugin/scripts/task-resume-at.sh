@@ -10,14 +10,29 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck disable=SC1091
 . "$SCRIPT_DIR/lib.sh" || { echo "auto-resume: failed to load lib.sh"; exit 0; }
 
-USAGE='Usage: claude-auto-resume resume-at [when] [critical|normal|low]
+USAGE='Usage: claude-auto-resume resume-at [when] [critical|normal|low] [--session <n|id|latest|new>]
   [when] accepts:
     (nothing) | auto           auto-detect: probe until the limit lifts,
                                then resume (no reset time needed)
     2026-07-18T20:00:00+0600   ISO-8601 timestamp
     20:00                      clock time (next occurrence)
     2h30m | 45m | 3h           relative from now
-    now                        immediately'
+    now                        immediately
+  --session picks WHICH conversation to continue (see: claude-auto-resume
+  sessions). Default: the newest session in this workspace; "new" starts a
+  fresh one.'
+
+# Pull --session out of the argument list first (position-independent).
+SESSION_ARG=""
+ARGS=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --session)   SESSION_ARG="${2:-latest}"; shift 2 || shift ;;
+    --session=*) SESSION_ARG="${1#--session=}"; shift ;;
+    *)           ARGS+=("$1"); shift ;;
+  esac
+done
+set -- ${ARGS[@]+"${ARGS[@]}"}
 
 WHEN="${1:-auto}"
 IMP="${2:-}"
@@ -86,7 +101,45 @@ fi
 RESUME_AT="$(ar_epoch_to_iso "$EPOCH")"
 WS="$(pwd)"
 
-FIELDS=("status=waiting" "resume_at=$RESUME_AT" "resume_mode=$RESUME_MODE")
+# --- session pinning (HOOK-FINDINGS F2/F3) --------------------------------
+# The daemon resumes with `claude --resume <session_id>` so the ORIGINAL
+# conversation continues. The id is pinned now, at schedule time, because
+# the daemon's own probes create new sessions and would corrupt any
+# "most recent" lookup done later.
+resolve_session() {
+  # $1: --session value -> full session id on stdout ("" = new session)
+  local want="$1" n=0 id
+  case "$want" in
+    new) return 0 ;;
+    latest|"") ar_session_latest "$WS" 2>/dev/null || true; return 0 ;;
+  esac
+  if printf '%s' "$want" | grep -Eq '^[0-9]+$'; then
+    ar_sessions_list "$WS" | sed -n "${want}p" | cut -f1
+    return 0
+  fi
+  # id or unique id prefix
+  id="$(ar_sessions_list "$WS" | cut -f1 | grep -i "^$want" | head -1)"
+  printf '%s\n' "${id:-$want}"
+}
+
+if [ -n "$SESSION_ARG" ]; then
+  SESSION_ID="$(resolve_session "$SESSION_ARG")"
+  if [ -z "$SESSION_ID" ] && [ "$SESSION_ARG" != "new" ]; then
+    echo "No session matches '--session $SESSION_ARG'."
+    echo "List them with: claude-auto-resume sessions"
+    exit 0
+  fi
+  SESSION_SOURCE="picked"
+else
+  SESSION_ID="$(ar_task_get "$WS" session_id)"
+  SESSION_SOURCE="kept"
+  if [ -z "$SESSION_ID" ]; then
+    SESSION_ID="$(ar_session_latest "$WS" 2>/dev/null || true)"
+    SESSION_SOURCE="latest"
+  fi
+fi
+
+FIELDS=("status=waiting" "resume_at=$RESUME_AT" "resume_mode=$RESUME_MODE" "session_id=$SESSION_ID")
 if ! ar_task_exists "$WS"; then
   # Untracked workspace being scheduled post-hoc: an explicit schedule
   # means "resume without asking", so default importance is critical.
@@ -100,7 +153,12 @@ if ! ar_task_upsert "$WS" "${FIELDS[@]}"; then
   exit 0
 fi
 ar_journal_append "$WS" "scheduled" "resume at $RESUME_AT"
-ar_log "task-resume-at: ws=$WS mode=$RESUME_MODE resume_at=$RESUME_AT"
+if [ -n "$SESSION_ID" ]; then
+  ar_journal_append "$WS" "session-pinned" "will continue session $(printf '%.8s' "$SESSION_ID") ($SESSION_SOURCE)"
+elif [ "$SESSION_ARG" = "new" ]; then
+  ar_journal_append "$WS" "session-pinned" "will start a fresh session (--session new)"
+fi
+ar_log "task-resume-at: ws=$WS mode=$RESUME_MODE resume_at=$RESUME_AT session=${SESSION_ID:-<new>}"
 
 if [ -z "${AR_NO_DAEMON:-}" ]; then
   nohup bash "$SCRIPT_DIR/daemon.sh" "$WS" >/dev/null 2>&1 &
@@ -115,6 +173,11 @@ else
   DELTA=$((EPOCH - $(date +%s)))
   [ "$DELTA" -lt 0 ] && DELTA=0
   echo "  resume at  : $RESUME_AT (~$((DELTA / 60)) min from now)"
+fi
+if [ -n "$SESSION_ID" ]; then
+  echo "  session    : $(printf '%.8s' "$SESSION_ID") — the original conversation continues (claude --resume)"
+else
+  echo "  session    : new chat (no existing session$( [ "$SESSION_ARG" = "new" ] && echo ' — --session new' ))"
 fi
 echo "  importance : $(ar_task_get "$WS" importance)"
 echo "  daemon     : $([ -n "${AR_NO_DAEMON:-}" ] && echo 'not spawned (AR_NO_DAEMON)' || echo 'running detached, wakes every 60s')"

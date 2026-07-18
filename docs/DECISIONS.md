@@ -243,3 +243,31 @@ plugin was redundant. One capability was lost knowingly: the probe also
 captured SessionStart and Notification events. If a real limit hit shows
 nothing on Stop/SessionEnd (HOOK-FINDINGS Q7), temporarily add hooks for
 those events; the old probe remains in git history for reference.
+
+## D23 — 2026-07-18 — True session resume: pin the session id at schedule time
+
+The gap that defeated the product's primary goal: `do_resume()` already
+passed `--resume <session_id>`, but nothing ever set `session_id`, so
+every resume opened a NEW chat instead of continuing the interrupted
+conversation. Fixed by measuring the surfaces first (HOOK-FINDINGS F2:
+`~/.claude/projects/<encoded-cwd>/<session-uuid>.jsonl` session store;
+F3: `-r/--resume <id>` headless-compatible), then:
+
+- `ar_sessions_list`/`ar_session_latest` in lib.sh discover a
+  workspace's sessions (read-only, newest first, UUID-filtered).
+- `resume-at` pins a session id INTO state at schedule time — default
+  the workspace's newest session, `--session <n|id|latest|new>` to
+  override; new `sessions` command lists them with pick indexes. An
+  already-pinned id is kept on reschedule.
+- Pinning happens at schedule time, not resume time, deliberately: the
+  daemon's own probes (`claude -p ok`) run in the workspace directory
+  and create new session files, so any later "most recent" lookup (or
+  `--continue`) would resume a probe stub instead of the real work.
+  For the same reason `--continue` is never used.
+- The cockpit shows session plates (summary · id · age · size) in the
+  schedule composer; selection flows through `resume-at --session`.
+  Extension reads the session store directly — still read-only, so D21's
+  "writes only through the CLI" holds.
+
+state.json schema unchanged (v2 already had `session_id`; it just was
+never written). Plugin 0.3.0, extension 0.5.0.

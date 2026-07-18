@@ -528,6 +528,86 @@ ar_journal_append() {
   printf '%s\n' "$new" | ar_state_write
 }
 
+# ------------------------------------------------- Claude Code sessions --
+# Session discovery against the MEASURED store layout (HOOK-FINDINGS F2):
+# ~/.claude/projects/<encoded-cwd>/<session-uuid>.jsonl
+
+AR_PROJECTS_DIR="${CLAUDE_PROJECTS_DIR:-$HOME/.claude/projects}"
+
+ar_project_dir() {
+  # $1: workspace path -> its session directory (may not exist)
+  printf '%s/%s\n' "$AR_PROJECTS_DIR" "$(printf '%s' "$1" | sed 's/[^A-Za-z0-9]/-/g')"
+}
+
+ar__file_mtime() {
+  stat -f %m "$1" 2>/dev/null && return 0   # BSD
+  stat -c %Y "$1" 2>/dev/null && return 0   # GNU
+  return 1
+}
+
+ar__session_summary() {
+  # $1: session jsonl -> first real user prompt, one line, <=70 chars.
+  # Only the first 40 lines are read (files can be many MB — F2). Slash
+  # command invocations (<command-name> tags) and meta lines are skipped.
+  local f="$1" out=""
+  if command -v python3 >/dev/null 2>&1; then
+    out="$(head -40 "$f" 2>/dev/null | python3 -c '
+import json, sys
+for line in sys.stdin:
+    try:
+        o = json.loads(line)
+    except Exception:
+        continue
+    if o.get("type") != "user" or o.get("isMeta"):
+        continue
+    c = o.get("message", {}).get("content", "")
+    if isinstance(c, list):
+        c = " ".join(b.get("text", "") for b in c if b.get("type") == "text")
+    c = " ".join(c.split())
+    if not c or c.startswith("<command-") or c.startswith("<local-command"):
+        continue
+    print(c[:70])
+    break
+' 2>/dev/null)"
+  fi
+  if [ -z "$out" ]; then
+    # Text tier: first user line's content field, crudely de-JSONed.
+    # Command/meta-only sessions yield "" (caller shows a dash).
+    out="$(head -40 "$f" 2>/dev/null | grep '"type":"user"' |
+      grep -v '<command-\|<local-command\|"isMeta":true' | head -1 |
+      sed -n 's/.*"content":"\([^"]*\)".*/\1/p' | cut -c1-70)"
+  fi
+  printf '%s\n' "$out"
+}
+
+ar_sessions_list() {
+  # $1: workspace -> lines "id<TAB>mtime_epoch<TAB>size_kb<TAB>summary",
+  # newest first. Empty output (rc 0) when no sessions exist.
+  local dir f id mt kb
+  dir="$(ar_project_dir "$1")"
+  [ -d "$dir" ] || return 0
+  # F2: session files are UUID-named; ls -t sorts by mtime (last activity).
+  ls -t "$dir" 2>/dev/null | while IFS= read -r f; do
+    case "$f" in
+      *.jsonl) ;;
+      *) continue ;;
+    esac
+    id="${f%.jsonl}"
+    printf '%s' "$id" | grep -Eq '^[0-9a-fA-F-]{32,40}$' || continue
+    mt="$(ar__file_mtime "$dir/$f")" || mt=0
+    kb=$(( $(wc -c < "$dir/$f" 2>/dev/null || echo 0) / 1024 ))
+    printf '%s\t%s\t%s\t%s\n' "$id" "$mt" "$kb" "$(ar__session_summary "$dir/$f")"
+  done
+}
+
+ar_session_latest() {
+  # $1: workspace -> most recent session id, or empty (rc 1)
+  local id
+  id="$(ar_sessions_list "$1" | head -1 | cut -f1)"
+  [ -n "$id" ] || return 1
+  printf '%s\n' "$id"
+}
+
 ar_daemon_pidfile() {
   # $1: workspace -> the pidfile path its daemon uses (D11)
   printf '%s/daemons/%s.pid\n' "$AR_HOME" "$(printf '%s' "$1" | cksum | awk '{print $1}')"

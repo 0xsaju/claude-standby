@@ -35,6 +35,7 @@ Per task (one per workspace directory):
 | Field | Values / example |
 |---|---|
 | `status` | waiting · resuming · running · limit-hit · done · failed · cancelled |
+| `session_id` | which Claude Code conversation the resume continues (`claude --resume <id>`); empty = a NEW chat will start — that's a warning state |
 | `importance` | critical (auto-resume) · normal (60 s grace) · low (notify only) |
 | `resume_at` | ISO timestamp — the moment of the next action |
 | `resume_mode` | `at` (exact time) or `auto` (probing until limit lifts) |
@@ -44,7 +45,9 @@ Per task (one per workspace directory):
 
 Global: current workspace path · other workspaces' tasks · health
 (CLI installed? hooks registered [via settings or plugin]? N daemons
-running?) · tool version.
+running?) · tool version · **recent sessions** of the current workspace
+(up to 6): id, first-prompt summary, relative age, size — the pool the
+user picks from when scheduling.
 
 ## 4. Information architecture (keep this hierarchy)
 
@@ -55,10 +58,20 @@ running?) · tool version.
    ("resumes in 2h 14m 09s"). Second: status. Third: schedule/cancel
    actions. Also shows: tier, auto-detect badge, attempts-used meter,
    task description.
-3. **Schedule composer** — presets (Auto-detect · 30m · 1h · 2h30m · Now),
-   custom time input (`20:00`, `45m`, ISO), tier select, confirm. Should
-   feel like one gesture, not a form. May be inline-expanding, a sheet,
-   or always-visible in the empty state — designer's choice.
+3. **Schedule composer** — TWO decisions, in this order:
+   a. **Which conversation to continue** — "session plates": selectable
+      cards for the workspace's recent Claude sessions (first-prompt
+      summary, short id, relative age, size) plus a "New chat" plate.
+      Newest is preselected. This is the product's core promise — the
+      user's interrupted conversation survives — so it deserves visual
+      weight.
+   b. **When** — presets (Auto-detect · 30m · 1h · 2h30m · Now), custom
+      time input (`20:00`, `45m`, ISO), tier select, confirm.
+   Should feel like one gesture, not a form. May be inline-expanding, a
+   sheet, or always-visible in the empty state — designer's choice.
+   The hero also shows which session is currently pinned ("continues
+   '<summary>'"); a task with NO pinned session shows a gentle warning
+   ("resume would start a new chat").
 4. **Other workspaces** — compact cards/rows; status dot, name, next
    event, schedule/cancel. Secondary citizens.
 5. **Activity timeline** — the journal, newest first, icons per event

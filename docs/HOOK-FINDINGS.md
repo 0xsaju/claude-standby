@@ -1,7 +1,8 @@
 # Hook findings — limit-hit behavior
 
-**STATUS: PARTIALLY VERIFIED — headless stdout format measured (F1); hook
-payloads and transcript format still unmeasured.**
+**STATUS: PARTIALLY VERIFIED — headless stdout format (F1), session store
+layout (F2), and resume flags (F3) measured; hook payloads and limit-time
+transcript behavior still unmeasured.**
 
 All detection code must stay stubbed (TODO(C1) markers in
 `plugin/scripts/on-stop.sh`) until the **Findings** section below contains
@@ -65,6 +66,55 @@ You've hit your session limit · resets 4:10pm (Asia/Dhaka)
 - One sample; wording may differ for weekly caps or other limit types —
   capture those when seen.
 - Hook payloads and transcript format: still unmeasured (Q1–Q4, Q6–Q7 open).
+
+### F2 — 2026-07-18 — Session store on disk (MEASURED)
+
+Inspected `~/.claude/projects/` directly (macOS, Claude Code 2.1.214):
+
+```
+~/.claude/projects/<encoded-cwd>/<session-uuid>.jsonl
+```
+
+- `<encoded-cwd>` is the workspace's absolute path with every
+  non-alphanumeric character replaced by `-`. Measured example:
+  `/Users/sazzad/Documents/claude-auto-resume` →
+  `-Users-sazzad-Documents-claude-auto-resume`. Only `/` and `.`-free
+  paths were sampled locally; the general `[^A-Za-z0-9] → -` rule matches
+  every project dir on this machine.
+- One JSONL file per session; the filename (minus `.jsonl`) IS the session
+  id accepted by `claude --resume <id>`.
+- Non-session entries can live in the same dir (e.g. a `memory/` subdir) —
+  session listing must filter to UUID-named `*.jsonl` files.
+- Line format (sampled): objects with `"type"` (`user`, `assistant`,
+  `file-history-snapshot`, `mode`, …), `"sessionId"`, `"timestamp"` (ISO,
+  Z), `"cwd"`, and for user/assistant a `"message"` object with
+  `role`/`content` (content = string or array of `{type:"text",text:...}`
+  blocks). Command invocations appear as user lines whose text contains
+  `<command-name>…` tags.
+- File mtime tracks last activity — safe sort key for "most recent".
+- Code citing this finding: `ar_project_dir` / `ar_sessions_list` in
+  `plugin/scripts/lib.sh`, session listing in the VS Code extension.
+
+### F3 — 2026-07-18 — Resume flags of the claude CLI (MEASURED)
+
+From `claude --help`, Claude Code 2.1.214:
+
+```
+-r, --resume [value]   Resume a conversation by session ID, or open
+                       interactive picker with optional search term
+-c, --continue         Continue the most recent conversation in the
+                       current directory
+    --fork-session     When resuming, create a new session ID instead of
+                       reusing the original (use with --resume or --continue)
+```
+
+- `-p/--print` is a boolean; the prompt is a positional argument, so
+  `claude --resume <id> -p "<prompt>"` is a valid headless resume.
+- `--continue` is NOT used by the daemon: its own probes (`claude -p ok`)
+  run in the workspace directory and would become the "most recent
+  conversation". The session id must be pinned at schedule time instead.
+- Code citing this finding: `do_resume()` in `plugin/scripts/daemon.sh`,
+  `plugin/scripts/task-resume-at.sh` session pinning.
 
 ## Consequences once filled
 

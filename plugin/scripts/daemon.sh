@@ -85,7 +85,11 @@ do_resume() {
   [ -n "$prompt" ] || prompt="$AR_DEFAULT_RESUME_PROMPT"
 
   ar_task_upsert "$WS" "status=resuming" "resume_count=$attempt"
-  ar_journal_append "$WS" "resumed" "attempt $attempt of $MAX"
+  if [ -n "$session_id" ]; then
+    ar_journal_append "$WS" "resumed" "attempt $attempt of $MAX — continuing session $(printf '%.8s' "$session_id")"
+  else
+    ar_journal_append "$WS" "resumed" "attempt $attempt of $MAX — new session (none pinned)"
+  fi
 
   set -- -p "$prompt"
   if [ -n "$session_id" ]; then

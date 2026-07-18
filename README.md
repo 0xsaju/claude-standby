@@ -29,11 +29,12 @@ $ claude-auto-resume resume-at
   Resume scheduled.
     workspace  : ~/projects/my-app
     resume at  : auto-detect (probing every 30 min until the limit lifts)
+    session    : 612fb08b — the original conversation continues (claude --resume)
     importance : critical
     daemon     : running detached, wakes every 60s
 
 $ # …close the laptop lid. Walk away.
-  # At reset: desktop notification → session resumes → task finishes.
+  # At reset: desktop notification → YOUR session picks up where it stopped.
 ```
 
 ## Why
@@ -49,6 +50,7 @@ the moment resuming is possible.
 
 | | |
 |---|---|
+| **True session resume** | The interrupted **conversation itself** continues (`claude --resume <session-id>`) — not a fresh chat. The newest session is pinned automatically; `claude-auto-resume sessions` lists them, `--session` picks another, and the VS Code cockpit shows them as one-click plates. |
 | **Automatic reset detection** | `claude-auto-resume resume-at` — one probe reads the reset time straight out of the limit message and schedules the resume for exactly that moment. No time to look up, nothing to type twice. |
 | **Works when nothing else does** | The CLI costs zero tokens and needs no model turn — it works *while you're rate-limited*, which is precisely when you need it. |
 | **Importance tiers** | `critical` resumes silently, `normal` gives you a 60-second window to object, `low` only notifies. |
@@ -112,7 +114,8 @@ Tip: `alias car='claude-auto-resume'`.
 
 | Command | Description |
 |---|---|
-| `resume-at [when] [tier]` | Schedule an auto-resume. No `when` = auto-detect the reset. Accepts `auto`, `20:00`, `2h30m`, `45m`, ISO-8601, `now`. |
+| `resume-at [when] [tier] [--session …]` | Schedule an auto-resume. No `when` = auto-detect the reset. Accepts `auto`, `20:00`, `2h30m`, `45m`, ISO-8601, `now`. `--session <n\|id\|latest\|new>` picks the conversation to continue (default: newest). |
+| `sessions` | List this workspace's Claude Code sessions — pick which one resumes. |
 | `start <tier> <description>` | Track this workspace (`critical` \| `normal` \| `low`). |
 | `status` | Task state, tier, attempts, resume time, journal. *(default)* |
 | `list` | All tracked workspaces. |
@@ -184,6 +187,7 @@ full automation awaits real-world hook data.
 
 | Capability | Status |
 |---|---|
+| True session resume (`--resume`, session picker in CLI + cockpit) | ✅ |
 | Auto reset detection (probe + measured message parsing) | ✅ |
 | Scheduled resume at a known time | ✅ |
 | Resume daemon: tiers, backoff, caps, instant cancel | ✅ |
