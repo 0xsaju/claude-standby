@@ -50,6 +50,7 @@ if [ -f "$PIDFILE" ]; then
 fi
 printf '%s\n' "$$" > "$PIDFILE"
 trap 'rm -f "$PIDFILE"' EXIT
+trap 'rm -f "$PIDFILE"; exit 0' TERM INT
 
 ar_log "daemon[$$]: watching $WS (tick=${TICK}s)"
 AUTO_START="$(date +%s)"
@@ -59,11 +60,21 @@ stand_down() {
   exit 0
 }
 
+PROBE_OUT=""
 do_probe() {
-  # Reset detection without parsing anything (C1-safe, D13): a minimal
-  # cheap call. While the limit is active it fails; the first success
-  # means the limit has provably reset.
-  "$CLAUDE_BIN" -p "ok" --model "$PROBE_MODEL" >/dev/null 2>&1
+  # Reset detection with a minimal cheap call (D13). "Still limited" means
+  # nonzero exit OR the measured limit message in the output — exit codes
+  # alone are not trusted because claude may exit 0 while limited
+  # (HOOK-FINDINGS F1: exit code unmeasured). Output is kept in PROBE_OUT
+  # so the caller can extract the announced reset time.
+  local rc
+  PROBE_OUT="$("$CLAUDE_BIN" -p "ok" --model "$PROBE_MODEL" 2>&1)"
+  rc=$?
+  [ "$rc" -ne 0 ] && return 1
+  case "$PROBE_OUT" in
+    *"$AR_LIMIT_PATTERN"*) return 1 ;;
+  esac
+  return 0
 }
 
 do_resume() {
@@ -86,6 +97,14 @@ do_resume() {
   rc=$?
   ar_task_set "$WS" last_output_tail "$(printf '%s' "$out" | tail -c 1500)"
   ar_log "daemon[$$]: attempt $attempt exited $rc"
+  # A resume that bounced off a still-active limit may still exit 0
+  # (HOOK-FINDINGS F1) — never let that count as success.
+  case "$out" in
+    *"$AR_LIMIT_PATTERN"*)
+      ar_log "daemon[$$]: attempt $attempt output contains the limit message — treating as failed"
+      return 1
+      ;;
+  esac
   return "$rc"
 }
 
@@ -120,9 +139,27 @@ while :; do
       stand_down "auto give-up window exceeded"
     fi
     if ! do_probe; then
-      NEXT_ISO="$(ar_epoch_to_iso $(( $(date +%s) + PROBE_INTERVAL )) )"
-      ar_task_set "$WS" resume_at "$NEXT_ISO"
-      ar_log "daemon[$$]: probe failed (still limited); next probe at $NEXT_ISO"
+      # Best case: the limit message announces the reset time (measured
+      # format, HOOK-FINDINGS F1) — wait for exactly that moment instead
+      # of blind-polling. Sanity window: >1 min (avoid rescheduling to
+      # tomorrow on boundary/clock skew) and <23 h.
+      NOW="$(date +%s)"
+      PARSED="$(ar_parse_reset_time "$PROBE_OUT")" || PARSED=""
+      if [ -n "$PARSED" ] && [ "$PARSED" -gt $((NOW + 60)) ] && [ "$PARSED" -lt $((NOW + 82800)) ]; then
+        NEXT_ISO="$(ar_epoch_to_iso "$PARSED")"
+        ar_task_set "$WS" resume_at "$NEXT_ISO"
+        ar_journal_append "$WS" "reset-detected" "limit message announces reset at $NEXT_ISO"
+        ar_log "daemon[$$]: reset time read from limit message: $NEXT_ISO"
+      elif [ -n "$PARSED" ]; then
+        # Message parsed but the time is now/borderline — retry soon.
+        NEXT_ISO="$(ar_epoch_to_iso $((NOW + 300)) )"
+        ar_task_set "$WS" resume_at "$NEXT_ISO"
+        ar_log "daemon[$$]: still limited at announced reset; retrying at $NEXT_ISO"
+      else
+        NEXT_ISO="$(ar_epoch_to_iso $((NOW + PROBE_INTERVAL)) )"
+        ar_task_set "$WS" resume_at "$NEXT_ISO"
+        ar_log "daemon[$$]: probe failed (still limited, no reset time in output); next probe at $NEXT_ISO"
+      fi
       continue
     fi
     ar_journal_append "$WS" "limit-lifted" "probe succeeded — limit has reset"

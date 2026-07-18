@@ -11,8 +11,13 @@
 #                                  on every invocation — lets tests flip a
 #                                  "limited" account to "reset" mid-daemon-run
 #   FAKE_CLAUDE_RUN_SECS=N         seconds of simulated work (default 1)
-#   FAKE_CLAUDE_RESET_AT=ISO       reset time in the limit message
-#                                  (default: now + 5h)
+#   FAKE_CLAUDE_RESET_AT=ISO       machine-readable reset time written to
+#                                  the transcript (default: now + 5h)
+#   FAKE_CLAUDE_RESET_DISPLAY=str  human reset time in the stdout limit
+#                                  message (default: "4:10pm (Asia/Dhaka)")
+#   FAKE_CLAUDE_LIMIT_EXIT=N       exit code in limit mode (default 1; the
+#                                  real CLI's is unmeasured and may be 0 —
+#                                  HOOK-FINDINGS F1)
 #   FAKE_CLAUDE_TRANSCRIPT_DIR=D   where transcripts go
 #                                  (default: $TMPDIR/fake-claude)
 #
@@ -22,9 +27,9 @@
 #
 # Exit codes: 0 = clean finish, 1 = limit hit, 2 = bad usage.
 #
-# NOTE (D5): the transcript and limit-message formats below are a GUESS.
-# Reconcile with docs/HOOK-FINDINGS.md when probe data lands; only the
-# fixture text should change, not the interface.
+# NOTE (D5): the stdout limit message is the MEASURED format
+# (docs/HOOK-FINDINGS.md F1). The transcript JSONL format is still a GUESS;
+# reconcile when hook/transcript probe data lands.
 set -u
 
 MODE="${FAKE_CLAUDE_MODE:-clean}"
@@ -89,12 +94,15 @@ if [ "$MODE" = "limit" ]; then
   if [ -z "$RESET_AT" ]; then
     RESET_AT="$(epoch_to_iso $(( $(date +%s) + 18000 )) )"
   fi
-  LIMIT_MSG="Claude usage limit reached. Your limit will reset at $RESET_AT."
-  emit "{\"type\":\"system\",\"subtype\":\"limit\",\"session_id\":\"$SESSION_ID\",\"ts\":\"$(now_iso)\",\"message\":\"$(esc "$LIMIT_MSG")\"}"
+  RESET_DISPLAY="${FAKE_CLAUDE_RESET_DISPLAY:-4:10pm (Asia/Dhaka)}"
+  # Stdout wording is MEASURED (HOOK-FINDINGS F1); reset_at in the
+  # transcript line is a machine-readable extra for tests.
+  LIMIT_MSG="You've hit your session limit · resets $RESET_DISPLAY"
+  emit "{\"type\":\"system\",\"subtype\":\"limit\",\"session_id\":\"$SESSION_ID\",\"ts\":\"$(now_iso)\",\"reset_at\":\"$RESET_AT\",\"message\":\"$(esc "$LIMIT_MSG")\"}"
   if [ "$OUTFMT" != "stream-json" ]; then
     echo "$LIMIT_MSG"
   fi
-  exit 1
+  exit "${FAKE_CLAUDE_LIMIT_EXIT:-1}"
 fi
 
 emit "{\"type\":\"result\",\"subtype\":\"success\",\"session_id\":\"$SESSION_ID\",\"ts\":\"$(now_iso)\",\"result\":\"Task completed cleanly.\"}"

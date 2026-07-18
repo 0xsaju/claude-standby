@@ -194,16 +194,19 @@ t_contains "fake: clean stdout" "Task completed cleanly." "$OUT"
 COUNT="$(ls "$FAKE_CLAUDE_TRANSCRIPT_DIR" | wc -l | tr -d ' ')"
 t_eq "fake: clean wrote one transcript" "1" "$COUNT"
 
-# limit run with pinned reset time
+# limit run with pinned reset times (stdout format is measured — F1)
 RESET="2026-07-18T20:00:00+0600"
-OUT="$(FAKE_CLAUDE_MODE=limit FAKE_CLAUDE_RESET_AT="$RESET" bash "$HERE/fake-claude.sh" -p "long task")"
+DISPLAY="8:00pm (Asia/Dhaka)"
+OUT="$(FAKE_CLAUDE_MODE=limit FAKE_CLAUDE_RESET_AT="$RESET" FAKE_CLAUDE_RESET_DISPLAY="$DISPLAY" bash "$HERE/fake-claude.sh" -p "long task")"
 RC=$?
-t_eq "fake: limit exit code" "1" "$RC"
-t_contains "fake: limit stdout has message" "usage limit reached" "$OUT"
-t_contains "fake: limit stdout has reset time" "$RESET" "$OUT"
+t_eq "fake: limit exit code (default)" "1" "$RC"
+t_contains "fake: limit stdout has measured wording" "hit your session limit" "$OUT"
+t_contains "fake: limit stdout has display reset time" "$DISPLAY" "$OUT"
 LIMIT_TRANSCRIPT="$(ls -t "$FAKE_CLAUDE_TRANSCRIPT_DIR"/*.jsonl | head -1)"
-t_contains "fake: transcript tail has limit text" "usage limit reached" "$(tail -2 "$LIMIT_TRANSCRIPT")"
-t_contains "fake: transcript tail has reset time" "$RESET" "$(tail -2 "$LIMIT_TRANSCRIPT")"
+t_contains "fake: transcript tail has limit text" "hit your session limit" "$(tail -2 "$LIMIT_TRANSCRIPT")"
+t_contains "fake: transcript tail has ISO reset time" "$RESET" "$(tail -2 "$LIMIT_TRANSCRIPT")"
+FAKE_CLAUDE_MODE=limit FAKE_CLAUDE_LIMIT_EXIT=0 bash "$HERE/fake-claude.sh" -p "x" >/dev/null
+t_eq "fake: limit exit code overridable to 0" "0" "$?"
 
 # resume appends to the same transcript
 SID="resume-test-1"
@@ -246,6 +249,29 @@ else
   fail "parse: HH:MM is next occurrence" "now: $NOW got: $E"
 fi
 t_contains "parse: garbage rejected" "Could not parse" "$(bash "$PLUGIN/scripts/task-resume-at.sh" 'not-a-time!!')"
+
+# reset-time extraction from the measured limit message (F1)
+. "$PLUGIN/scripts/lib.sh"
+MSG="You've hit your session limit · resets 4:10pm (Asia/Dhaka)"
+E="$(ar_parse_reset_time "$MSG")"
+if [ -n "$E" ] && [ "$E" -gt "$(date +%s)" ] && [ "$E" -le $(( $(date +%s) + 86400 )) ]; then
+  ok "resetparse: F1 message yields a future epoch within 24h"
+else
+  fail "resetparse: F1 message yields a future epoch within 24h" "got: '$E'"
+fi
+SHOWN="$(TZ=Asia/Dhaka date -r "$E" '+%I:%M%p' 2>/dev/null || TZ=Asia/Dhaka date -d "@$E" '+%I:%M%p')"
+t_eq "resetparse: wall clock preserved in zone" "04:10PM" "$SHOWN"
+E="$(ar_parse_reset_time "hit your session limit · resets 12:05am (America/New_York)")"
+SHOWN="$(TZ=America/New_York date -r "$E" '+%I:%M%p' 2>/dev/null || TZ=America/New_York date -d "@$E" '+%I:%M%p')"
+t_eq "resetparse: 12:05am midnight handling" "12:05AM" "$SHOWN"
+E="$(ar_parse_reset_time "resets 9:00am")"
+[ -n "$E" ] && [ "$E" -gt "$(date +%s)" ] && ok "resetparse: zoneless message uses local zone" \
+  || fail "resetparse: zoneless message uses local zone" "got: '$E'"
+if ar_parse_reset_time "no reset info here" >/dev/null; then
+  fail "resetparse: garbage rejected"
+else
+  ok "resetparse: garbage rejected"
+fi
 rm -rf "$PTMP"
 
 # ------------------------------------------------- scheduling + daemon --
@@ -335,10 +361,15 @@ WS8="$DTMP/ws-auto-tier"; mkdir -p "$WS8"
 t_eq "auto: tier-only arg implies auto" "auto" "$(ar_task_get "$WS8" resume_mode)"
 t_eq "auto: tier-only arg sets tier" "low" "$(ar_task_get "$WS8" importance)"
 
-# auto mode: limit lifts mid-wait -> daemon probes, detects, resumes
+# auto mode: limit lifts mid-wait -> daemon probes, detects, resumes.
+# The limited CLI exits 0 here to prove the probe trusts the measured
+# limit message (F1), not the exit code. Display is unparseable so the
+# daemon falls back to interval polling.
 MODEFILE="$DTMP/fake-mode"
 printf 'limit' > "$MODEFILE"
 export FAKE_CLAUDE_MODE_FILE="$MODEFILE"
+export FAKE_CLAUDE_LIMIT_EXIT=0
+export FAKE_CLAUDE_RESET_DISPLAY="soon"
 export AR_PROBE_INTERVAL_SECS=1
 bash "$PLUGIN/scripts/daemon.sh" "$WS7" &
 DPID=$!
@@ -355,6 +386,28 @@ else
   t_eq "auto: probe failures didn't consume attempts" "1" "$(ar_task_get "$WS7" resume_count)"
 fi
 
+# auto mode: announced reset time is read from the limit message (F1)
+WS10="$DTMP/ws-auto-parse"; mkdir -p "$WS10"
+printf 'limit' > "$MODEFILE"
+export FAKE_CLAUDE_RESET_DISPLAY="4:10pm (Asia/Dhaka)"
+(cd "$WS10" && AR_NO_DAEMON=1 bash "$PLUGIN/scripts/task-resume-at.sh" auto >/dev/null)
+bash "$PLUGIN/scripts/daemon.sh" "$WS10" &
+DPID=$!
+sleep 3
+t_contains "auto: reset-detected journaled from message" "reset-detected" "$(ar_journal_show "$WS10" 5)"
+t_eq "auto: waits for the announced time" "waiting" "$(ar_task_get "$WS10" status)"
+kill "$DPID" 2>/dev/null
+wait "$DPID" 2>/dev/null
+
+# scheduled mode: a resume that bounces off the limit with exit 0 must
+# NOT be marked done (bounce guard on the measured message)
+WS11="$DTMP/ws-bounce0"; mkdir -p "$WS11"
+export FAKE_CLAUDE_RESET_DISPLAY="soon"
+(cd "$WS11" && AR_NO_DAEMON=1 bash "$PLUGIN/scripts/task-resume-at.sh" now >/dev/null)
+ar_task_set "$WS11" max_resumes 1
+bash "$PLUGIN/scripts/daemon.sh" "$WS11"
+t_eq "daemon: exit-0 limit bounce ends failed, not done" "failed" "$(ar_task_get "$WS11" status)"
+
 # auto mode: gives up when limit never lifts within the window
 WS9="$DTMP/ws-auto-giveup"; mkdir -p "$WS9"
 printf 'limit' > "$MODEFILE"
@@ -362,7 +415,7 @@ printf 'limit' > "$MODEFILE"
 AR_AUTO_GIVEUP_SECS=1 bash "$PLUGIN/scripts/daemon.sh" "$WS9"
 t_eq "auto: gives up after window" "failed" "$(ar_task_get "$WS9" status)"
 t_contains "auto: give-up journaled" "did not lift" "$(ar_journal_show "$WS9" 5)"
-unset FAKE_CLAUDE_MODE_FILE AR_PROBE_INTERVAL_SECS
+unset FAKE_CLAUDE_MODE_FILE AR_PROBE_INTERVAL_SECS FAKE_CLAUDE_LIMIT_EXIT FAKE_CLAUDE_RESET_DISPLAY
 
 # daemon: pidfiles cleaned up
 if ls "$DTMP"/daemons/*.pid >/dev/null 2>&1; then

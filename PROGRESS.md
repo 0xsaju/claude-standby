@@ -48,6 +48,18 @@ Living checklist for claude-auto-resume. Update before ending any session.
   - [x] state.json schema v2: optional `resume_mode: at|auto` (v1 files
         still readable); fake-claude gained FAKE_CLAUDE_MODE_FILE for
         mid-run limit-lift simulation; tests 119 → 129, all green
+- [x] **First measured detection surface (F1)** (2026-07-18, D14)
+  - [x] Real headless limit output captured by user: "You've hit your
+        session limit · resets 4:10pm (Asia/Dhaka)" → HOOK-FINDINGS F1
+  - [x] `ar_parse_reset_time()` + `AR_LIMIT_PATTERN` in lib.sh; auto mode
+        now reads the announced reset time from the first failed probe
+        and waits for exactly that moment (interval polling = fallback)
+  - [x] Exit codes never trusted alone (limited calls may exit 0 — exit
+        code still unmeasured): probe success = exit 0 AND no limit
+        pattern; resumes that bounce with exit 0 are treated as failed
+  - [x] fake-claude stdout re-pointed to measured format (D5);
+        FAKE_CLAUDE_LIMIT_EXIT + FAKE_CLAUDE_RESET_DISPLAY test knobs;
+        tests 129 → 138, all green
 
 ## In progress
 

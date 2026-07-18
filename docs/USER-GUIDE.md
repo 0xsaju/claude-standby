@@ -108,10 +108,13 @@ Resume scheduled.
   daemon     : running detached, wakes every 60s
 ```
 
-You can close the terminal. The daemon checks every 30 minutes whether the
-limit has lifted — by making a minimal, near-free `haiku` call and looking
-only at whether it succeeds — and resumes your task the moment it has. No
-reset time to look up or type.
+You can close the terminal. The daemon makes one minimal, near-free `haiku`
+probe call; while limited, that call returns the limit message — whose
+format is measured, e.g. `You've hit your session limit · resets 4:10pm
+(Asia/Dhaka)` — so the daemon reads the announced reset time out of it and
+waits for exactly that moment. If the message can't be parsed, it falls
+back to re-probing every 30 minutes. Either way: no reset time to look up
+or type.
 
 If you'd rather resume at an exact time (slightly cheaper — zero probe
 calls — and precise to the minute), pass it explicitly:
@@ -274,9 +277,10 @@ bookkeeping and (soon) hook-based instant detection.
 
 **What do the auto-mode probes cost?** Failed probes (limit still active)
 are rejected calls and are believed to cost nothing. Each *successful*
-probe costs one minimal `haiku` call — and there's exactly one of those per
-resume, since the daemon resumes immediately after it. If you want zero
-probe overhead, pass an explicit time.
+probe costs one minimal `haiku` call — and in the normal case there are
+exactly two probes total: one failed probe that reveals the reset time,
+and one successful probe at that time confirming it before the resume. If
+you want zero probe overhead, pass an explicit time.
 
 **Why is automatic detection not built yet, when hooks exist?** Because the
 payloads Claude Code emits at a limit hit are undocumented, and code built

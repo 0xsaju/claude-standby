@@ -37,7 +37,7 @@ loop: schedule once, walk away, come back to a finished task.
 
 | Feature | Description |
 |---|---|
-| **Automatic reset detection** | Just run `/task-resume-at` — the daemon probes with a minimal call until the limit lifts, then resumes. No reset time to look up. |
+| **Automatic reset detection** | Just run `/task-resume-at` — the daemon probes once, reads the reset time straight out of the limit message, and resumes at exactly that moment. No reset time to look up. |
 | **Post-limit scheduling** | Know the reset time? `/task-resume-at 20:00` resumes exactly then — no probing, no pre-registration needed. |
 | **Importance tiers** | `critical` resumes with no questions asked, `normal` gives you a 60-second window to object, `low` just notifies you. |
 | **Suspend-safe waiting** | The daemon wakes every 60 s and compares wall-clock time, so a closed laptop lid doesn't break the schedule. |
@@ -130,6 +130,7 @@ deliberately unimplemented until measured.
 | Capability | Status |
 |---|---|
 | Automatic reset detection (probe-based, `/task-resume-at`) | ✅ Implemented, tested |
+| Reset-time parsing from the limit message (measured format, F1) | ✅ Implemented, tested |
 | Scheduled resume at a known time (`/task-resume-at 20:00`) | ✅ Implemented, tested |
 | Resume daemon (tiers, backoff, safety rails) | ✅ Implemented, tested |
 | Task tracking + journal (`/task-start`, `/task-status`, `/task-cancel`) | ✅ Implemented, tested |
@@ -138,15 +139,18 @@ deliberately unimplemented until measured.
 | `/warmup` window scheduler | 🕐 Planned |
 | VS Code cockpit | 🕐 Planned |
 
-Auto-detection today works by *probing*: a minimal `claude -p "ok" --model
-haiku` call every 30 minutes fails while the limit is active and succeeds
-the moment it lifts — exit-code-only, so nothing is assumed about message
-formats. Hook-based detection will upgrade this to "know the exact reset
-time the instant the limit hits", but it's built strictly against
-*measured* hook behavior, not guesses: the `claude-limit-hook-probe/`
-instrumentation plugin captures what Claude Code actually emits, results
-land in [docs/HOOK-FINDINGS.md](docs/HOOK-FINDINGS.md), and the detection
-code cites them.
+Auto-detection works by *probing*: a minimal `claude -p "ok" --model
+haiku` call fails while the limit is active. The limit message's format has
+been measured on a real limited account
+(`You've hit your session limit · resets 4:10pm (Asia/Dhaka)` — recorded as
+F1 in [docs/HOOK-FINDINGS.md](docs/HOOK-FINDINGS.md)), so the daemon reads
+the announced reset time from the first failed probe and waits for exactly
+that moment; if the message can't be parsed, it falls back to polling every
+30 minutes. Exit codes are never trusted alone — a resume whose output
+contains the limit message is treated as a failed attempt even if the CLI
+exits 0. Hook-based detection (catching the limit the instant it hits,
+with the session id, no probe at all) still awaits hook-payload probe data
+from `claude-limit-hook-probe/`.
 
 ## Development
 

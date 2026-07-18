@@ -31,6 +31,10 @@ AR_NUMERIC_FIELDS=" resume_count max_resumes "
 
 AR_DEFAULT_RESUME_PROMPT="Limit reset. Continue from where you stopped. Check PROGRESS.md first."
 
+# Substring that identifies a limit message. MEASURED — cite:
+# docs/HOOK-FINDINGS.md F1 ("You've hit your session limit · resets ...").
+AR_LIMIT_PATTERN="hit your session limit"
+
 # ------------------------------------------------------------ timestamps --
 
 ar_now_iso() {
@@ -56,6 +60,43 @@ ar_epoch_to_iso() {
   date -r "$1" '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null && return 0   # BSD
   date -d "@$1" '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null && return 0  # GNU
   return 1
+}
+
+ar_parse_reset_time() {
+  # $1: text containing a limit message in the MEASURED format
+  # (docs/HOOK-FINDINGS.md F1):
+  #   "You've hit your session limit · resets 4:10pm (Asia/Dhaka)"
+  # -> epoch of the NEXT occurrence of that wall-clock time, on stdout.
+  # Uses the zone's current UTC offset (no DST-transition handling; a
+  # reset is always < 24h away so this is at most a rare 1h skew).
+  local text="$1" t zone hh mm rest ampm today offset iso target now
+  t="$(printf '%s' "$text" | sed -n 's/.*resets[[:space:]]*\([0-9][0-9]\{0,1\}:[0-9][0-9][ap]m\).*/\1/p' | head -1)"
+  [ -n "$t" ] || return 1
+  zone="$(printf '%s' "$text" | sed -n 's/.*resets[^(]*(\([A-Za-z0-9_/+-]*\)).*/\1/p' | head -1)"
+  hh="${t%%:*}"
+  rest="${t#*:}"
+  mm="${rest%[ap]m}"
+  ampm="${rest#"$mm"}"
+  hh=$((10#$hh))
+  mm=$((10#$mm))
+  case "$ampm" in
+    pm) [ "$hh" -ne 12 ] && hh=$((hh + 12)) ;;
+    am) [ "$hh" -eq 12 ] && hh=0 ;;
+  esac
+  if [ -n "$zone" ]; then
+    today="$(TZ="$zone" date '+%Y-%m-%d')"
+    offset="$(TZ="$zone" date '+%z')"
+  else
+    today="$(date '+%Y-%m-%d')"
+    offset="$(date '+%z')"
+  fi
+  iso="$(printf '%sT%02d:%02d:00%s' "$today" "$hh" "$mm" "$offset")"
+  target="$(ar_iso_to_epoch "$iso")" || return 1
+  now="$(date +%s)"
+  if [ "$target" -le "$now" ]; then
+    target=$((target + 86400))
+  fi
+  printf '%s\n' "$target"
 }
 
 # --------------------------------------------------------------- logging --

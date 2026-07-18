@@ -112,3 +112,26 @@ honesty: each successful probe spends one minimal haiku call; failed probes
 are believed free (the call is rejected). Schema: new optional task field
 `resume_mode: "at" | "auto"` (absent ⇒ "at"), version bumped to 2; v1 files
 remain readable since all readers default the field.
+
+## D14 — 2026-07-18 — First measured limit surface (F1); detection trusts the message, never exit codes alone
+
+User captured the real headless limit output:
+`You've hit your session limit · resets 4:10pm (Asia/Dhaka)` — recorded as
+HOOK-FINDINGS F1, the first C1-compliant detection surface. Implemented:
+
+- `AR_LIMIT_PATTERN` ("hit your session limit") and `ar_parse_reset_time()`
+  in lib.sh (h:mm am/pm + IANA zone → next-occurrence epoch; uses the
+  zone's current offset — no DST-transition handling, acceptable for a
+  <24 h horizon).
+- Auto mode upgraded: a failed probe's output is parsed for the announced
+  reset time, so the daemon waits for the exact moment instead of blind
+  polling (sanity window >1 min and <23 h; if the announced time has
+  arrived but the limit hasn't lifted, retry every 5 min).
+- The exit code of a limited call is STILL unmeasured (the first capture
+  piped through tee, so `$?` was tee's). Therefore: probe success requires
+  exit 0 AND no limit pattern in output; a resume whose output contains
+  the pattern is treated as a bounce even if it exits 0 — this prevents
+  falsely marking tasks done.
+- fake-claude's stdout fixture re-pointed to the measured format per D5
+  (transcript format remains a guess); `FAKE_CLAUDE_LIMIT_EXIT` emulates
+  either exit-code behavior in tests.
