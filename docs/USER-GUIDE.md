@@ -92,11 +92,10 @@ notified, nothing runs again until you reschedule.
 
 ### 4.1 You just hit a limit (the common case)
 
-Claude Code shows a limit message with a reset time. In that session (or a
-new one in the same directory):
+In that session (or a new one in the same directory), just run:
 
 ```text
-/task-resume-at 20:00
+/task-resume-at
 ```
 
 Output:
@@ -104,26 +103,40 @@ Output:
 ```text
 Resume scheduled.
   workspace  : /Users/you/myproject
-  resume at  : 2026-07-18T20:00:00+0600 (~312 min from now)
+  resume at  : auto-detect (probing every 30 min until the limit lifts)
   importance : critical
   daemon     : running detached, wakes every 60s
 ```
 
-You can close the terminal. At 20:00 the daemon resumes the task; you get a
-notification at each step. Check progress any time with `/task-status`.
+You can close the terminal. The daemon checks every 30 minutes whether the
+limit has lifted — by making a minimal, near-free `haiku` call and looking
+only at whether it succeeds — and resumes your task the moment it has. No
+reset time to look up or type.
 
-Time formats accepted:
+If you'd rather resume at an exact time (slightly cheaper — zero probe
+calls — and precise to the minute), pass it explicitly:
+
+```text
+/task-resume-at 20:00
+```
 
 | Input | Meaning |
 |---|---|
+| *(nothing)* or `auto` | Probe until the limit lifts, then resume |
 | `20:00` | Next occurrence of 20:00 local time (today, or tomorrow if already past) |
 | `2h30m`, `45m`, `3h` | Relative from now |
 | `2026-07-18T20:00:00+0600` | Exact ISO-8601 timestamp |
 | `now` | Immediately (useful for "just try again") |
 
-A second argument sets the tier: `/task-resume-at 20:00 normal`. A task
-scheduled on a previously untracked workspace defaults to `critical` — you
-explicitly asked for a resume, so it doesn't ask again.
+A tier argument works with either form: `/task-resume-at normal` (auto
+mode) or `/task-resume-at 20:00 normal`. A task scheduled on a previously
+untracked workspace defaults to `critical` — you explicitly asked for a
+resume, so it doesn't ask again.
+
+Auto mode gives up after 6 hours of continuous limitation (configurable):
+a 5-hour rolling window always resets within that; if it's still limited,
+you've likely hit a **weekly cap**, which no amount of waiting today will
+fix — you get a notification saying exactly that.
 
 ### 4.2 Track a long task before starting it
 
@@ -153,11 +166,14 @@ task to `waiting` and the journal keeps the full history.
 
 ## 5. Command reference
 
-### `/task-resume-at <when> [critical|normal|low]`
+### `/task-resume-at [when] [critical|normal|low]`
 
 Schedules an auto-resume for the current workspace and spawns the daemon.
-Creates the task if the workspace wasn't tracked (default tier `critical`);
-otherwise keeps the existing tier unless you pass one.
+With no `when` (or `auto`), the daemon probes until the limit lifts and
+resumes then; with a time, it resumes at that time. Creates the task if the
+workspace wasn't tracked (default tier `critical`); otherwise keeps the
+existing tier unless you pass one. Re-running it reschedules — the running
+daemon picks up the change within one tick.
 
 ### `/task-start <critical|normal|low> <task description>`
 
@@ -189,6 +205,9 @@ Optional config file: `~/.claude/auto-resume/config` (plain shell,
 | — | `AR_DAEMON_TICK_SECS` | `60` | Daemon wake interval |
 | — | `AR_NORMAL_GRACE_SECS` | `60` | `normal` tier confirmation window |
 | — | `AR_BACKOFF_BASE_SECS` | `300` | Backoff unit after a failed attempt |
+| — | `AR_PROBE_INTERVAL_SECS` | `1800` | Auto mode: seconds between limit probes |
+| `AR_CFG_PROBE_MODEL` | `AR_PROBE_MODEL` | `haiku` | Auto mode: model for the probe call |
+| — | `AR_AUTO_GIVEUP_SECS` | `21600` | Auto mode: give up after this long still limited (6 h ≈ "must be a weekly cap") |
 | — | `AR_NOTIFY_SILENT` | *(unset)* | Set to `1` to suppress desktop notifications |
 
 Example config:
@@ -249,9 +268,15 @@ without you having to be present. Weekly caps are unaffected by anything
 this tool does.
 
 **Does scheduling have to happen before the limit hits?** No — that's the
-main flow: schedule *after* the limit, using the reset time from the limit
-message. Pre-tracking with `/task-start` just adds bookkeeping and (soon)
-automatic detection.
+main flow: run `/task-resume-at` *after* the limit, and you don't even need
+to know the reset time. Pre-tracking with `/task-start` just adds
+bookkeeping and (soon) hook-based instant detection.
+
+**What do the auto-mode probes cost?** Failed probes (limit still active)
+are rejected calls and are believed to cost nothing. Each *successful*
+probe costs one minimal `haiku` call — and there's exactly one of those per
+resume, since the daemon resumes immediately after it. If you want zero
+probe overhead, pass an explicit time.
 
 **Why is automatic detection not built yet, when hooks exist?** Because the
 payloads Claude Code emits at a limit hit are undocumented, and code built

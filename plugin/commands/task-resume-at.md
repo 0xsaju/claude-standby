@@ -1,6 +1,6 @@
 ---
-description: Schedule an auto-resume for this workspace (use after a limit hit)
-argument-hint: <when: 20:00 | 2h30m | ISO-8601 | now> [critical|normal|low]
+description: Schedule an auto-resume for this workspace (use after a limit hit; no args = auto-detect the reset)
+argument-hint: "[when: auto | 20:00 | 2h30m | ISO-8601 | now] [critical|normal|low]"
 allowed-tools: Bash
 ---
 

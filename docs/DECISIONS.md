@@ -95,3 +95,20 @@ detected and replaced on the next spawn.
 fake-claude (C6) and what lets users add a permission allowlist without the
 tool ever adding `--dangerously-skip-permissions` itself (C5). Distinct
 AR_CFG_* names prevent the sourced config from clobbering env overrides.
+
+## D13 — 2026-07-18 — Auto reset detection via probe calls; state schema v2 adds resume_mode
+
+User asked for automatic resume without typing the reset time. Parsing the
+reset time from the limit message stays blocked on probe data (C1), but a
+probe loop needs no parsing at all: `claude -p "ok" --model haiku` fails
+while limited and succeeds the moment the limit lifts — exit-code-only
+detection, C1-safe. `/task-resume-at` with no time (or `auto`) sets
+`resume_mode=auto`; the daemon then treats `resume_at` as the *next probe
+time* (default every 30 min, `AR_PROBE_INTERVAL_SECS`), probes, and on
+success falls into the normal tier/resume flow. Probe failures never count
+against `max_resumes`. A give-up window (`AR_AUTO_GIVEUP_SECS`, default 6 h)
+catches weekly caps, which never lift within a rolling window. Cost
+honesty: each successful probe spends one minimal haiku call; failed probes
+are believed free (the call is rejected). Schema: new optional task field
+`resume_mode: "at" | "auto"` (absent ⇒ "at"), version bumped to 2; v1 files
+remain readable since all readers default the field.

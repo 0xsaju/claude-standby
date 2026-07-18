@@ -14,6 +14,7 @@ fi
 
 IMPORTANCE="$(ar_task_get "$WS" importance)"
 RESUME_AT="$(ar_task_get "$WS" resume_at)"
+RESUME_MODE="$(ar_task_get "$WS" resume_mode)"
 RESUME_COUNT="$(ar_task_get "$WS" resume_count)"
 MAX_RESUMES="$(ar_task_get "$WS" max_resumes)"
 PROMPT="$(ar_task_get "$WS" original_prompt)"
@@ -22,7 +23,11 @@ echo "Task in $WS"
 echo "  status     : $STATUS"
 echo "  importance : $IMPORTANCE"
 echo "  resumes    : ${RESUME_COUNT:-0} of ${MAX_RESUMES:-3}"
-[ -n "$RESUME_AT" ] && echo "  resume at  : $RESUME_AT"
+if [ "$RESUME_MODE" = "auto" ]; then
+  echo "  resume     : auto-detect (probing; next probe: ${RESUME_AT:-soon})"
+elif [ -n "$RESUME_AT" ]; then
+  echo "  resume at  : $RESUME_AT"
+fi
 if [ -n "$PROMPT" ]; then
   if [ "${#PROMPT}" -gt 72 ]; then
     echo "  prompt     : ${PROMPT:0:72}…"

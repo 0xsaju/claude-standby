@@ -10,19 +10,24 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck disable=SC1091
 . "$SCRIPT_DIR/lib.sh" || { echo "auto-resume: failed to load lib.sh"; exit 0; }
 
-USAGE='Usage: /task-resume-at <when> [critical|normal|low]
-  <when> accepts:
+USAGE='Usage: /task-resume-at [when] [critical|normal|low]
+  [when] accepts:
+    (nothing) | auto           auto-detect: probe until the limit lifts,
+                               then resume (no reset time needed)
     2026-07-18T20:00:00+0600   ISO-8601 timestamp
     20:00                      clock time (next occurrence)
     2h30m | 45m | 3h           relative from now
     now                        immediately'
 
-WHEN="${1:-}"
+WHEN="${1:-auto}"
 IMP="${2:-}"
-if [ -z "$WHEN" ]; then
-  echo "$USAGE"
-  exit 0
-fi
+# allow "/task-resume-at critical" (tier only, auto-detect implied)
+case "$WHEN" in
+  critical|normal|low)
+    IMP="$WHEN"
+    WHEN="auto"
+    ;;
+esac
 case "$IMP" in
   critical|normal|low|"") ;;
   *) echo "$USAGE"; exit 0 ;;
@@ -61,7 +66,13 @@ parse_when() {
   ar_iso_to_epoch "$w"
 }
 
-EPOCH="$(parse_when "$WHEN")" || EPOCH=""
+RESUME_MODE="at"
+if [ "$WHEN" = "auto" ]; then
+  RESUME_MODE="auto"
+  EPOCH="$(date +%s)"   # in auto mode, resume_at is the next probe time
+else
+  EPOCH="$(parse_when "$WHEN")" || EPOCH=""
+fi
 if [ -z "$EPOCH" ]; then
   echo "Could not parse time '$WHEN'."
   echo "$USAGE"
@@ -75,7 +86,7 @@ fi
 RESUME_AT="$(ar_epoch_to_iso "$EPOCH")"
 WS="$(pwd)"
 
-FIELDS=("status=waiting" "resume_at=$RESUME_AT")
+FIELDS=("status=waiting" "resume_at=$RESUME_AT" "resume_mode=$RESUME_MODE")
 if ! ar_task_exists "$WS"; then
   # Untracked workspace being scheduled post-hoc: an explicit schedule
   # means "resume without asking", so default importance is critical.
@@ -95,11 +106,15 @@ if [ -z "${AR_NO_DAEMON:-}" ]; then
   disown 2>/dev/null || true
 fi
 
-DELTA=$((EPOCH - $(date +%s)))
-[ "$DELTA" -lt 0 ] && DELTA=0
 echo "Resume scheduled."
 echo "  workspace  : $WS"
-echo "  resume at  : $RESUME_AT (~$((DELTA / 60)) min from now)"
+if [ "$RESUME_MODE" = "auto" ]; then
+  echo "  resume at  : auto-detect (probing every $(( ${AR_PROBE_INTERVAL_SECS:-1800} / 60 )) min until the limit lifts)"
+else
+  DELTA=$((EPOCH - $(date +%s)))
+  [ "$DELTA" -lt 0 ] && DELTA=0
+  echo "  resume at  : $RESUME_AT (~$((DELTA / 60)) min from now)"
+fi
 echo "  importance : $(ar_task_get "$WS" importance)"
 echo "  daemon     : $([ -n "${AR_NO_DAEMON:-}" ] && echo 'not spawned (AR_NO_DAEMON)' || echo 'running detached, wakes every 60s')"
 echo "Cancel any time with /task-cancel. Watch with /task-status."

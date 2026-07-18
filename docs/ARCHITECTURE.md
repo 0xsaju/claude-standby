@@ -30,11 +30,11 @@ The `commands` array is the UI→daemon channel (e.g.
 
 Schema changes require a `version` bump and an entry in `docs/DECISIONS.md`.
 
-## state.json schema (v1)
+## state.json schema (v2)
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "tasks": {
     "<workspace-abs-path>": {
       "session_id": "",
@@ -42,6 +42,7 @@ Schema changes require a `version` bump and an entry in `docs/DECISIONS.md`.
       "importance": "critical | normal | low",
       "original_prompt": "",
       "resume_at": "ISO-8601 with timezone",
+      "resume_mode": "at | auto",
       "resume_count": 0,
       "max_resumes": 3,
       "resume_prompt_template": "Limit reset. Continue from where you stopped. Check PROGRESS.md first.",
@@ -62,8 +63,12 @@ Field notes:
   one tracked task per workspace (see DECISIONS D3).
 - **session_id** — filled from hook payloads once a session stops (hooks
   receive it; slash commands don't). Empty until then.
-- **resume_at** — parsed from the limit message; ISO-8601 with timezone so
-  the daemon compares wall clock unambiguously across suspend/resume.
+- **resume_at** — ISO-8601 with timezone so the daemon compares wall clock
+  unambiguously across suspend/resume. In `auto` mode it holds the *next
+  probe time* instead of a known reset time (D13).
+- **resume_mode** (v2, D13) — `at` = resume at a known time; `auto` = probe
+  with a minimal cheap call until the limit provably lifts, then resume.
+  Absent field ⇒ `at` (v1 files stay readable).
 - **resume_count / max_resumes** — safety rail C5; the daemon refuses to
   resume past the cap.
 - **last_output_tail** — final transcript lines at stop time, used for
@@ -79,9 +84,16 @@ state. Two things write that state:
    message and runs `/task-resume-at <when>`. The command sets
    `status=waiting` + `resume_at` and spawns the daemon. No detection
    involved; the human is the detector.
-2. **Automatic detection (Phase 1, blocked on HOOK-FINDINGS.md):**
+2. **Probe-based auto detection (implemented — D13):** `/task-resume-at`
+   with no time. The daemon fires a minimal `claude -p "ok" --model haiku`
+   every 30 min; while limited it fails, and the first success means the
+   limit has provably reset — exit-code-only, so C1 is untouched. Bounded
+   by a give-up window (default 6 h) to catch weekly caps.
+3. **Hook-based detection (Phase 1, blocked on HOOK-FINDINGS.md):**
    `on-stop.sh` recognizes the limit in the hook payload/transcript, writes
-   the same fields, spawns the same daemon.
+   the same fields, spawns the same daemon. This upgrades auto mode from
+   "poll every 30 min" to "know the exact reset time instantly, zero probe
+   cost" — same state contract, same daemon.
 
 This is why the daemon could ship before detection: the state contract
 decouples them.

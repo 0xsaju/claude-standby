@@ -7,6 +7,9 @@
 #
 # Control via env:
 #   FAKE_CLAUDE_MODE=clean|limit   behavior at end of "run" (default clean)
+#   FAKE_CLAUDE_MODE_FILE=path     if set, mode is (re)read from this file
+#                                  on every invocation — lets tests flip a
+#                                  "limited" account to "reset" mid-daemon-run
 #   FAKE_CLAUDE_RUN_SECS=N         seconds of simulated work (default 1)
 #   FAKE_CLAUDE_RESET_AT=ISO       reset time in the limit message
 #                                  (default: now + 5h)
@@ -25,6 +28,9 @@
 set -u
 
 MODE="${FAKE_CLAUDE_MODE:-clean}"
+if [ -n "${FAKE_CLAUDE_MODE_FILE:-}" ] && [ -f "${FAKE_CLAUDE_MODE_FILE}" ]; then
+  MODE="$(cat "${FAKE_CLAUDE_MODE_FILE}")"
+fi
 RUN_SECS="${FAKE_CLAUDE_RUN_SECS:-1}"
 TDIR="${FAKE_CLAUDE_TRANSCRIPT_DIR:-${TMPDIR:-/tmp}/fake-claude}"
 

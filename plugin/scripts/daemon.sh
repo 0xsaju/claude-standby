@@ -30,6 +30,9 @@ WS="${1:-}"
 TICK="${AR_DAEMON_TICK_SECS:-60}"
 GRACE="${AR_NORMAL_GRACE_SECS:-60}"
 BACKOFF_BASE="${AR_BACKOFF_BASE_SECS:-300}"
+PROBE_INTERVAL="${AR_PROBE_INTERVAL_SECS:-1800}"
+PROBE_MODEL="${AR_PROBE_MODEL:-${AR_CFG_PROBE_MODEL:-haiku}}"
+AUTO_GIVEUP="${AR_AUTO_GIVEUP_SECS:-21600}"
 CLAUDE_BIN="${CLAUDE_AUTO_RESUME_CLAUDE_BIN:-${AR_CFG_CLAUDE_BIN:-claude}}"
 EXTRA_ARGS="${CLAUDE_AUTO_RESUME_EXTRA_ARGS:-${AR_CFG_EXTRA_ARGS:-}}"
 
@@ -49,10 +52,18 @@ printf '%s\n' "$$" > "$PIDFILE"
 trap 'rm -f "$PIDFILE"' EXIT
 
 ar_log "daemon[$$]: watching $WS (tick=${TICK}s)"
+AUTO_START="$(date +%s)"
 
 stand_down() {
   ar_log "daemon[$$]: $1 — standing down"
   exit 0
+}
+
+do_probe() {
+  # Reset detection without parsing anything (C1-safe, D13): a minimal
+  # cheap call. While the limit is active it fails; the first success
+  # means the limit has provably reset.
+  "$CLAUDE_BIN" -p "ok" --model "$PROBE_MODEL" >/dev/null 2>&1
 }
 
 do_resume() {
@@ -95,6 +106,27 @@ while :; do
   if [ "$NOW" -lt "$TARGET" ]; then
     sleep "$TICK"
     continue
+  fi
+
+  # In auto mode, resume_at is the NEXT PROBE time, not a known reset
+  # time: probe first, and only fall through to resuming once the limit
+  # has provably lifted. Probe failures don't count against max_resumes.
+  RESUME_MODE="$(ar_task_get "$WS" resume_mode)"
+  if [ "$RESUME_MODE" = "auto" ]; then
+    if [ $((NOW - AUTO_START)) -ge "$AUTO_GIVEUP" ]; then
+      ar_task_set "$WS" status failed
+      ar_journal_append "$WS" "failed" "auto mode: limit did not lift within ${AUTO_GIVEUP}s (weekly cap?)"
+      ar_notify "Auto-resume gave up" "Task in $WS: limit still active after $((AUTO_GIVEUP / 3600))h. If this is a weekly cap, schedule manually later."
+      stand_down "auto give-up window exceeded"
+    fi
+    if ! do_probe; then
+      NEXT_ISO="$(ar_epoch_to_iso $(( $(date +%s) + PROBE_INTERVAL )) )"
+      ar_task_set "$WS" resume_at "$NEXT_ISO"
+      ar_log "daemon[$$]: probe failed (still limited); next probe at $NEXT_ISO"
+      continue
+    fi
+    ar_journal_append "$WS" "limit-lifted" "probe succeeded — limit has reset"
+    ar_log "daemon[$$]: probe succeeded — proceeding to resume"
   fi
 
   COUNT="$(ar_task_get "$WS" resume_count)"

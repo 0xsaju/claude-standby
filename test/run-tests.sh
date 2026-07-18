@@ -61,7 +61,7 @@ state_suite() {
   # 1. init
   ar_state_init
   [ -f "$CLAUDE_AUTO_RESUME_STATE" ] && ok "$eng: init creates state file" || fail "$eng: init creates state file"
-  t_contains "$eng: init writes version 1" '"version": 1' "$(cat "$CLAUDE_AUTO_RESUME_STATE")"
+  t_contains "$eng: init writes version 2" '"version": 2' "$(cat "$CLAUDE_AUTO_RESUME_STATE")"
 
   # 2. upsert + get round trip (incl. a value with quotes and equals sign)
   local PROMPT='Build the "thing" x=1 and keep going'
@@ -321,6 +321,48 @@ ar_task_upsert "$WS6" "resume_count=3" "max_resumes=3"
 bash "$PLUGIN/scripts/daemon.sh" "$WS6"
 t_eq "daemon: exhausted cap fails fast" "failed" "$(ar_task_get "$WS6" status)"
 t_contains "daemon: cap journaled" "max_resumes" "$(ar_journal_show "$WS6" 5)"
+
+# auto mode: bare invocation schedules probe-based detection
+WS7="$DTMP/ws-auto"; mkdir -p "$WS7"
+OUT="$(cd "$WS7" && AR_NO_DAEMON=1 bash "$PLUGIN/scripts/task-resume-at.sh")"
+t_contains "auto: bare invocation confirms" "auto-detect" "$OUT"
+t_eq "auto: resume_mode stored" "auto" "$(ar_task_get "$WS7" resume_mode)"
+t_eq "auto: status waiting" "waiting" "$(ar_task_get "$WS7" status)"
+
+# auto mode: tier-only argument implies auto
+WS8="$DTMP/ws-auto-tier"; mkdir -p "$WS8"
+(cd "$WS8" && AR_NO_DAEMON=1 bash "$PLUGIN/scripts/task-resume-at.sh" low >/dev/null)
+t_eq "auto: tier-only arg implies auto" "auto" "$(ar_task_get "$WS8" resume_mode)"
+t_eq "auto: tier-only arg sets tier" "low" "$(ar_task_get "$WS8" importance)"
+
+# auto mode: limit lifts mid-wait -> daemon probes, detects, resumes
+MODEFILE="$DTMP/fake-mode"
+printf 'limit' > "$MODEFILE"
+export FAKE_CLAUDE_MODE_FILE="$MODEFILE"
+export AR_PROBE_INTERVAL_SECS=1
+bash "$PLUGIN/scripts/daemon.sh" "$WS7" &
+DPID=$!
+sleep 3
+printf 'clean' > "$MODEFILE"
+WAITED=0
+while kill -0 "$DPID" 2>/dev/null && [ "$WAITED" -lt 15 ]; do sleep 1; WAITED=$((WAITED + 1)); done
+if kill -0 "$DPID" 2>/dev/null; then
+  kill "$DPID" 2>/dev/null
+  fail "auto: daemon resumes when limit lifts" "daemon still running after ${WAITED}s"
+else
+  t_eq "auto: daemon resumes when limit lifts" "done" "$(ar_task_get "$WS7" status)"
+  t_contains "auto: limit-lifted journaled" "limit-lifted" "$(ar_journal_show "$WS7" 10)"
+  t_eq "auto: probe failures didn't consume attempts" "1" "$(ar_task_get "$WS7" resume_count)"
+fi
+
+# auto mode: gives up when limit never lifts within the window
+WS9="$DTMP/ws-auto-giveup"; mkdir -p "$WS9"
+printf 'limit' > "$MODEFILE"
+(cd "$WS9" && AR_NO_DAEMON=1 bash "$PLUGIN/scripts/task-resume-at.sh" auto >/dev/null)
+AR_AUTO_GIVEUP_SECS=1 bash "$PLUGIN/scripts/daemon.sh" "$WS9"
+t_eq "auto: gives up after window" "failed" "$(ar_task_get "$WS9" status)"
+t_contains "auto: give-up journaled" "did not lift" "$(ar_journal_show "$WS9" 5)"
+unset FAKE_CLAUDE_MODE_FILE AR_PROBE_INTERVAL_SECS
 
 # daemon: pidfiles cleaned up
 if ls "$DTMP"/daemons/*.pid >/dev/null 2>&1; then

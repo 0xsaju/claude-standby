@@ -39,6 +39,15 @@ Living checklist for claude-auto-resume. Update before ending any session.
   - [x] Docs overhaul: professional README (features, status matrix,
         mermaid lifecycle), full docs/USER-GUIDE.md manual,
         .claude-plugin/marketplace.json for installability
+- [x] **Auto reset detection (probe-based)** (2026-07-18, D13)
+  - [x] Bare `/task-resume-at` (or `auto`, or tier-only) → daemon probes
+        with a minimal haiku call every 30 min; first success = limit
+        provably lifted → resume. Exit-code-only, C1-safe
+  - [x] Probe failures don't consume max_resumes; 6 h give-up window
+        catches weekly caps with an honest notification
+  - [x] state.json schema v2: optional `resume_mode: at|auto` (v1 files
+        still readable); fake-claude gained FAKE_CLAUDE_MODE_FILE for
+        mid-run limit-lift simulation; tests 119 → 129, all green
 
 ## In progress
 

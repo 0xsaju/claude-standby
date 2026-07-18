@@ -37,7 +37,8 @@ loop: schedule once, walk away, come back to a finished task.
 
 | Feature | Description |
 |---|---|
-| **Post-limit scheduling** | Already hit the limit? `/task-resume-at 20:00` schedules the resume — no pre-registration needed. |
+| **Automatic reset detection** | Just run `/task-resume-at` — the daemon probes with a minimal call until the limit lifts, then resumes. No reset time to look up. |
+| **Post-limit scheduling** | Know the reset time? `/task-resume-at 20:00` resumes exactly then — no probing, no pre-registration needed. |
 | **Importance tiers** | `critical` resumes with no questions asked, `normal` gives you a 60-second window to object, `low` just notifies you. |
 | **Suspend-safe waiting** | The daemon wakes every 60 s and compares wall-clock time, so a closed laptop lid doesn't break the schedule. |
 | **Context-aware resume** | Resume prompts point the session at your `PROGRESS.md` so it picks up where it left off. |
@@ -88,7 +89,8 @@ Requires Claude Code with plugin support, bash, and macOS or Linux
 Then, the day a limit hits you mid-task:
 
 ```text
-/task-resume-at 20:00        # resume when your window resets at 20:00
+/task-resume-at              # auto-detect the reset and resume (default)
+/task-resume-at 20:00        # or resume exactly when your window resets
 /task-status                 # watch it
 /task-cancel                 # changed your mind
 ```
@@ -106,7 +108,7 @@ Full walkthroughs, configuration, and troubleshooting: see the
 
 | Command | What it does |
 |---|---|
-| `/task-resume-at <when> [tier]` | Schedule an auto-resume for this workspace. `<when>` accepts `20:00`, `2h30m`, `45m`, full ISO-8601, or `now`. |
+| `/task-resume-at [when] [tier]` | Schedule an auto-resume for this workspace. No arguments = auto-detect the reset by probing. `[when]` accepts `auto`, `20:00`, `2h30m`, `45m`, full ISO-8601, or `now`. |
 | `/task-start <tier> <prompt>` | Track this workspace as a resumable task (`critical` \| `normal` \| `low`). |
 | `/task-status` | Show status, resume schedule, attempt count, and recent journal. |
 | `/task-cancel` | Cancel tracking; any pending auto-resume stands down within one tick. |
@@ -127,20 +129,24 @@ deliberately unimplemented until measured.
 
 | Capability | Status |
 |---|---|
-| Manual post-limit scheduling (`/task-resume-at`) | ✅ Implemented, tested |
+| Automatic reset detection (probe-based, `/task-resume-at`) | ✅ Implemented, tested |
+| Scheduled resume at a known time (`/task-resume-at 20:00`) | ✅ Implemented, tested |
 | Resume daemon (tiers, backoff, safety rails) | ✅ Implemented, tested |
 | Task tracking + journal (`/task-start`, `/task-status`, `/task-cancel`) | ✅ Implemented, tested |
-| **Automatic** limit detection via hooks | 🔬 Blocked on probe data — see below |
+| Instant limit detection via hooks (exact reset time, zero probe cost) | 🔬 Blocked on probe data — see below |
 | Resume-verification fallback prompt | 🕐 Planned |
 | `/warmup` window scheduler | 🕐 Planned |
 | VS Code cockpit | 🕐 Planned |
 
-Automatic detection is built strictly against *measured* hook behavior, not
-guesses: the `claude-limit-hook-probe/` instrumentation plugin captures what
-Claude Code actually emits at a limit hit, results land in
-[docs/HOOK-FINDINGS.md](docs/HOOK-FINDINGS.md), and the detection code cites
-them. Until then, the manual `/task-resume-at` flow covers the same need
-with you as the detector.
+Auto-detection today works by *probing*: a minimal `claude -p "ok" --model
+haiku` call every 30 minutes fails while the limit is active and succeeds
+the moment it lifts — exit-code-only, so nothing is assumed about message
+formats. Hook-based detection will upgrade this to "know the exact reset
+time the instant the limit hits", but it's built strictly against
+*measured* hook behavior, not guesses: the `claude-limit-hook-probe/`
+instrumentation plugin captures what Claude Code actually emits, results
+land in [docs/HOOK-FINDINGS.md](docs/HOOK-FINDINGS.md), and the detection
+code cites them.
 
 ## Development
 

@@ -173,7 +173,7 @@ ar_state_init() {
   [ -f "$AR_STATE_FILE" ] && return 0
   ar_state_write <<'EOF'
 {
-  "version": 1,
+  "version": 2,
   "tasks": {},
   "commands": []
 }
@@ -190,6 +190,7 @@ ar__jq_upsert() {
     "importance": "normal",
     "original_prompt": "",
     "resume_at": "",
+    "resume_mode": "at",
     "resume_count": 0,
     "max_resumes": 3,
     "resume_prompt_template": $defprompt,
@@ -226,7 +227,8 @@ rest = sys.argv[4:]
 
 DEFAULTS = {
     "session_id": "", "status": "running", "importance": "normal",
-    "original_prompt": "", "resume_at": "", "resume_count": 0,
+    "original_prompt": "", "resume_at": "", "resume_mode": "at",
+    "resume_count": 0,
     "max_resumes": 3, "resume_prompt_template": defprompt,
     "last_output_tail": "", "progress_file": "PROGRESS.md", "journal": [],
 }
@@ -312,6 +314,7 @@ ar__text_insert_task() {
       print "      \"importance\": \"normal\","
       print "      \"original_prompt\": \"\","
       print "      \"resume_at\": \"\","
+      print "      \"resume_mode\": \"at\","
       print "      \"resume_count\": 0,"
       print "      \"max_resumes\": 3,"
       print "      \"resume_prompt_template\": \"" ENVIRON["AR_DP"] "\","
