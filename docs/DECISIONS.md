@@ -233,3 +233,13 @@ source (F5) or a locally packaged .vsix; not published to the
 marketplace yet. Extension has no automated tests (would need the VS
 Code test harness) — verified by `node --check` + manual run;
 acceptable for a thin shell that must stay thin.
+
+## D22 — 2026-07-18 — Standalone probe plugin removed (supersedes D9)
+
+`claude-limit-hook-probe/` was deleted (user removed it from disk; the
+deletion rode along in commit 0949926). Correct call: its capture
+function moved into `on-stop.sh` (hook-payloads.log), so the standalone
+plugin was redundant. One capability was lost knowingly: the probe also
+captured SessionStart and Notification events. If a real limit hit shows
+nothing on Stop/SessionEnd (HOOK-FINDINGS Q7), temporarily add hooks for
+those events; the old probe remains in git history for reference.

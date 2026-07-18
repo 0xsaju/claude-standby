@@ -49,8 +49,8 @@ contract = `~/.claude/auto-resume/state.json`.
 - `docs/ARCHITECTURE.md` — full design; `docs/DECISIONS.md` — append-only
   decision log; `docs/HOOK-FINDINGS.md` — probe results (source of truth
   for detection)
-- `claude-limit-hook-probe/` — throwaway instrumentation plugin that
-  produces HOOK-FINDINGS data; leave as-is
+- (the standalone probe plugin was removed 2026-07-18 — on-stop.sh now
+  captures hook payloads itself; see D22)
 
 ## Working conventions
 

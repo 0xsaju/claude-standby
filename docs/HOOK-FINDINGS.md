@@ -10,25 +10,21 @@ formats documented here. No invented payload shapes.
 
 ## How to produce the data
 
-**Easiest (since 2026-07-18):** just have the claude-auto-resume plugin
-installed. Its `on-stop.sh` hook automatically appends every Stop/SessionEnd
-payload + a 40-line transcript tail to
-`~/.claude/auto-resume/logs/hook-payloads.log`. After a limit hit, copy the
-entries around that timestamp into **Findings** below.
+Capture is automatic: with the hooks registered (`setup-hooks` or the
+plugin), `on-stop.sh` appends every Stop/SessionEnd payload plus a 40-line
+transcript tail to `~/.claude/auto-resume/logs/hook-payloads.log`. After a
+limit hit, copy the entries around that timestamp into **Findings** below
+(note whether the session was interactive or headless).
 
-Alternative: the standalone instrumentation plugin in
-`claude-limit-hook-probe/` (see its README) additionally captures
-SessionStart and Notification events. Short version:
+Contributors welcome: if you hit a limit with the hooks installed, a
+sanitized excerpt of that log is the single most valuable contribution
+this project can receive — see CONTRIBUTING.md.
 
-1. Install the probe hooks (copy hook blocks into `~/.claude/settings.json`
-   or install the folder as a local plugin).
-2. Verify liveness: run a trivial prompt, check
-   `~/.claude/limit-hook-probe/hooks.log` shows SessionStart/Stop entries.
-3. Near the end of a usage window, run a real agentic task until the limit
-   message appears. Note the wall-clock time.
-4. Repeat once in headless mode if affordable:
-   `claude -p "…" --output-format stream-json`.
-5. Paste the relevant `hooks.log` excerpts into **Findings** below.
+Caveat: only Stop and SessionEnd are captured. If a real limit hit shows
+nothing on those events (Q7), temporarily add SessionStart/Notification
+hooks the same way to answer Q3. (A standalone probe plugin that captured
+all four events existed early on; it was removed once capture moved into
+on-stop.sh — see git history if needed.)
 
 ## Open questions
 

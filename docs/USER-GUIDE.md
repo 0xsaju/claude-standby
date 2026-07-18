@@ -361,9 +361,9 @@ you want zero probe overhead, pass an explicit time.
 
 **Why is automatic detection not built yet, when hooks exist?** Because the
 payloads Claude Code emits at a limit hit are undocumented, and code built
-on guessed payloads fails silently at the worst moment. We measure first
-(`claude-limit-hook-probe/`), then build against the measurements
-([HOOK-FINDINGS.md](HOOK-FINDINGS.md)).
+on guessed payloads fails silently at the worst moment. The installed hooks
+record real payloads to `hook-payloads.log`; detection gets built against
+those measurements ([HOOK-FINDINGS.md](HOOK-FINDINGS.md)), not guesses.
 
 **Can two workspaces wait at once?** Yes. Each gets its own daemon and its
 own task entry.

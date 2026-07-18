@@ -148,10 +148,12 @@ summary + PROGRESS.md contents.
 ## Detection: the C1 rule
 
 Which hooks fire on a limit hit — and what their payloads and the transcript
-contain — is **unknown until the probe test completes**
-(`claude-limit-hook-probe/` produces the data; results land in
-`docs/HOOK-FINDINGS.md`). All detection logic must match only against
-documented findings. Until then, `on-stop.sh` is a clearly-marked stub.
+contain — is **unknown until measured on a real limit hit**. The registered
+hooks capture every Stop/SessionEnd payload to
+`~/.claude/auto-resume/logs/hook-payloads.log`; results land in
+`docs/HOOK-FINDINGS.md`. All detection logic must match only against
+documented findings. Until then, `on-stop.sh`'s detection is a
+clearly-marked stub.
 
 **Fallback design:** if findings show hooks don't fire on limit-hit, we
 switch to a supervisor wrapper script that launches and watches the claude

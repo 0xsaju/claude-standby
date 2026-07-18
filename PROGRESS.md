@@ -1,147 +1,62 @@
 # PROGRESS
 
-Living checklist for claude-auto-resume. Update before ending any session.
+Living checklist for claude-auto-resume. Update before ending any working
+session. Detailed rationale for every decision: `docs/DECISIONS.md`
+(D1–D22). All dates 2026-07-18 unless noted.
 
 ## Done
 
-- [x] **Phase 0 — Scaffold + harness** (2026-07-18)
-  - [x] Repo structure: `plugin/` (manifest, hooks, commands, scripts),
-        `test/`, `docs/`, `vscode-extension/.gitkeep`, CLAUDE.md,
-        .gitignore, MIT LICENSE
-  - [x] Governance docs: ARCHITECTURE.md, DECISIONS.md (D1–D9),
-        HOOK-FINDINGS.md template (STATUS: UNVERIFIED)
-  - [x] `plugin/scripts/lib.sh` — state.json helpers with atomic writes and
-        a jq → python3 → awk/sed text-tier fallback chain (D2), logging,
-        notify (osascript → notify-send → log-only), timestamp helpers
-        (BSD/GNU dual path)
-  - [x] `/task-start`, `/task-status`, `/task-cancel` commands + backends
-  - [x] `plugin/scripts/on-stop.sh` — hook entry, detection **stubbed**
-        per C1 with TODO(C1) markers citing docs/HOOK-FINDINGS.md
-  - [x] `test/fake-claude.sh` — claude CLI stub (clean/limit modes, resume,
-        stream-json, JSONL transcripts; format explicitly GUESSED, D5)
-  - [x] `test/run-tests.sh` — 90 tests, all green on macOS (BSD userland):
-        per-engine state suites (jq / python3 / text), cross-engine
-        interop, timestamps, fake-claude, on-stop smoke
-  - [x] Cleanup pass: user-facing README.md added, junk files removed,
-        JSON/syntax/test verification re-run, repo initialized (D8)
-- [x] **Phase 2 — Daemon + manual scheduling** (2026-07-18, reordered
-      before Phase 1 per D10)
-  - [x] `/task-resume-at <when> [tier]` — post-limit manual scheduling;
-        parses ISO / HH:MM / relative (2h30m) / now; spawns daemon
-  - [x] `plugin/scripts/daemon.sh` — 60 s wake loop (suspend-safe),
-        importance tiers (critical/normal/low), resume execution,
-        max_resumes cap, failed-attempt backoff, pidfile dedup (D11),
-        stands down on cancel within one tick
-  - [x] Config file `~/.claude/auto-resume/config` (AR_CFG_*, D12);
-        claude binary swappable for tests (C6)
-  - [x] Test suite extended to 119 (parse, schedule, daemon lifecycle:
-        clean / limit-bounce / cancel / caps / tiers) — all green
-  - [x] Docs overhaul: professional README (features, status matrix,
-        mermaid lifecycle), full docs/USER-GUIDE.md manual,
-        .claude-plugin/marketplace.json for installability
-- [x] **Auto reset detection (probe-based)** (2026-07-18, D13)
-  - [x] Bare `/task-resume-at` (or `auto`, or tier-only) → daemon probes
-        with a minimal haiku call every 30 min; first success = limit
-        provably lifted → resume. Exit-code-only, C1-safe
-  - [x] Probe failures don't consume max_resumes; 6 h give-up window
-        catches weekly caps with an honest notification
-  - [x] state.json schema v2: optional `resume_mode: at|auto` (v1 files
-        still readable); fake-claude gained FAKE_CLAUDE_MODE_FILE for
-        mid-run limit-lift simulation; tests 119 → 129, all green
-- [x] **First measured detection surface (F1)** (2026-07-18, D14)
-  - [x] Real headless limit output captured by user: "You've hit your
-        session limit · resets 4:10pm (Asia/Dhaka)" → HOOK-FINDINGS F1
-  - [x] `ar_parse_reset_time()` + `AR_LIMIT_PATTERN` in lib.sh; auto mode
-        now reads the announced reset time from the first failed probe
-        and waits for exactly that moment (interval polling = fallback)
-  - [x] Exit codes never trusted alone (limited calls may exit 0 — exit
-        code still unmeasured): probe success = exit 0 AND no limit
-        pattern; resumes that bounce with exit 0 are treated as failed
-  - [x] fake-claude stdout re-pointed to measured format (D5);
-        FAKE_CLAUDE_LIMIT_EXIT + FAKE_CLAUDE_RESET_DISPLAY test knobs;
-        tests 129 → 138, all green
-- [x] **Zero-token terminal CLI** (2026-07-18, D15) — user caught that
-      slash commands cost a model turn AND can't run while limited
-  - [x] `bin/claude-auto-resume` (status|start|resume-at|cancel|log|watch),
-        symlink-safe, same scripts/state as the slash commands
-  - [x] command scripts now ar_log their actions; tests 138 → 145
-  - [x] README/USER-GUIDE: CLI-first guidance for the limited state
-  - [x] Plugin verified installed via local marketplace by user
-        (/plugin marketplace add + install + /reload-plugins)
-- [x] **One-command installer** (2026-07-18, D16)
-  - [x] `install.sh`: curl-pipe-bash, no root; clone/update to
-        ~/.claude-auto-resume, CLI symlink to ~/.local/bin, PATH hint,
-        tarball fallback without git, --uninstall (keeps runtime state)
-  - [x] Installer test cycle (install → run via symlink → update →
-        uninstall) offline against the local clone; tests 145 → 153
-- [x] **Open source + CLI-first consolidation** (2026-07-18, D17)
-  - [x] Repo made public by user; curl-pipe-bash installer verified live
-        against the real GitHub URL (install → run → status)
-  - [x] Slash commands removed — plugin is now a hook sensor only; all
-        user-facing strings show CLI syntax; docs restructured around
-        the CLI (README, USER-GUIDE §2.1, ARCHITECTURE components)
-- [x] **Live-run fixes** (2026-07-18, from user's first real CLI session)
-  - [x] on-stop.sh now captures full hook payloads + transcript tails to
-        logs/hook-payloads.log — next limit hit produces HOOK-FINDINGS
-        data automatically, no probe install needed
-  - [x] cancel during an in-flight resume is no longer overwritten by
-        done/failed when the claude process finishes
-  - [x] CLI --help no longer leaks a code line; tests 153 → 158
-- [x] **Full tool surface, v0.2.0** (2026-07-18, D18)
-  - [x] `version`, `update`, `uninstall [--yes]` (dirty-checkout guard),
-        `doctor` (env self-check), `list` (+ lib ar_task_list, all
-        engines); tests 158 → 177
-- [x] **cancel = stop now** (2026-07-18, D19) — real-world find: an
-      in-flight resume kept burning quota ~15 min after cancel; cancel
-      now kills the daemon + descendants via pidfile; tests → 179
-- [x] **One installer = whole environment** (2026-07-18, D20)
-  - [x] `setup-hooks`/`remove-hooks`: surgical settings.json merge with
-        backups, idempotency, plugin-conflict refusal, python3-required
-        with manual fallback; doctor shows hook status
-  - [x] install.sh registers hooks; both uninstall paths remove them;
-        plugin demoted to alternative packaging; tests 179 → 199
-- [x] **VS Code cockpit MVP** (2026-07-18, D21)
-  - [x] `vscode-extension/`: plain-JS extension — status bar (state.json
-        watch + poll), quick-pick menu (schedule/status/cancel/log),
-        CLI-missing onboarding with install-in-terminal button
-  - [x] Verified via node --check + manifest validation; run from source
-        (F5); marketplace publishing deferred
-
-## In progress
-
-- (nothing)
+- [x] **Phase 0 — Scaffold + harness.** Repo structure, governance docs,
+      `lib.sh` state library (atomic writes; jq → python3 → awk/sed
+      engines), `fake-claude.sh` stub + shell test suite. (D1–D9)
+- [x] **Phase 2 — Daemon + manual scheduling** (built before Phase 1 by
+      design, D10). Suspend-safe 60 s wait loop, importance tiers,
+      max_resumes + backoff, `resume-at` time parsing, pidfile dedup.
+      (D10–D12)
+- [x] **Auto reset detection.** Probe-based (`resume-at` with no args) +
+      reset-time parsing from the measured limit message (HOOK-FINDINGS
+      F1); exit codes never trusted alone; schema v2 `resume_mode`.
+      (D13–D14)
+- [x] **CLI-first consolidation.** Zero-token terminal CLI as the primary
+      interface (slash commands removed — they cost tokens and can't run
+      while limited); full tool surface: version / update / uninstall /
+      doctor / list; cancel kills in-flight resumes. (D15, D17–D19)
+- [x] **Distribution.** Open-sourced; one-command installer that delivers
+      the complete environment — CLI + hooks registered directly in
+      `~/.claude/settings.json` via `setup-hooks` (surgical merge,
+      backups, reversible); plugin demoted to alternative packaging;
+      standalone probe removed (capture lives in on-stop.sh). v0.2.0.
+      (D16, D20, D22)
+- [x] **VS Code cockpit MVP.** Plain-JS extension: status bar over
+      state.json, quick-pick actions through the CLI, install onboarding.
+      Runs from source; unpublished. (D21)
+- [x] **Test suite: 200 green** — three JSON engines, daemon lifecycle,
+      auto mode, hooks setup/removal, installer cycle, CLI surface.
 
 ## Next
 
-- [ ] **Human action required:** run the probe (`claude-limit-hook-probe/`)
-      through a real limit hit and paste hooks.log excerpts into
-      `docs/HOOK-FINDINGS.md` — Phase 1 is blocked on this
-- [ ] **Real-world smoke test:** on the already-limited test subscription,
-      install the plugin, `/task-resume-at <reset time>`, verify the daemon
-      resumes when the limit lifts (first real-quota milestone, C6)
-- [ ] **Phase 1 — Detection:** real `detect_limit()` in on-stop.sh, limit
-      message → `resume_at` parser, task-done vs limit-hit branching,
-      session_id capture (D6); update fake-claude fixture text (D5)
-- [ ] **Phase 3 — Loop closure + polish:** stuck detection (PROGRESS.md
-      unchanged across two resumes), resume-verification fallback prompt,
-      `/warmup` scheduler installer, reboot-surviving schedules
-- [ ] **Phase 4:** VS Code cockpit reading state.json
-- [ ] **Native Windows:** Task Scheduler one-shot at resume time instead
-      of the sleep-loop daemon (same approach later → launchd/cron
-      reboot-surviving schedules on macOS/Linux)
+- [ ] **Waiting on a real limit hit** (hooks now capture automatically to
+      `logs/hook-payloads.log`): paste findings into
+      `docs/HOOK-FINDINGS.md` → unblocks Phase 1
+- [ ] **Phase 1 — Hook detection:** real `detect_limit()` in on-stop.sh,
+      session_id capture (D6) → true `--resume`, zero-typing scheduling
+- [ ] **Phase 3 — Polish:** stuck detection (PROGRESS.md unchanged across
+      two resumes), resume-verification fallback prompt, `/warmup`
+      scheduler, reboot-surviving schedules (launchd/cron one-shots)
+- [ ] **Cockpit:** manual F5 verification pass, then marketplace
+      publishing (needs a publisher account)
+- [ ] **Native Windows:** Task Scheduler one-shot instead of the
+      sleep-loop daemon
+- [ ] Capture on next limit hit: un-piped exit code of a limited call
+      (`claude -p "ok" --model haiku >/dev/null 2>&1; echo $?`)
 
-## Handoff note (Phase 0+2 → real-world test / Phase 1)
+## Handoff note
 
-The tool is now functionally useful without detection: `/task-resume-at`
-covers the post-limit case with the human as the detector (D10), and
-`daemon.sh` executes the full wait→resume→done/backoff/failed lifecycle —
-119/119 tests green against fake-claude, plus a manual end-to-end run with
-a detached daemon. Next milestone is the first real-quota test on the
-already-limited subscription: install the plugin there, schedule a resume
-for the reset time, and confirm the daemon fires; while at it, run the
-probe hooks so `docs/HOOK-FINDINGS.md` finally gets real payload data —
-that unblocks Phase 1 detection, which just needs to write the same state
-fields the manual command writes. All state manipulation goes through
-lib.sh's public API (`ar_task_get/upsert/set`, `ar_journal_append`); don't
-reach into state.json directly. Keep docs/USER-GUIDE.md in sync with any
-behavior change.
+The tool is complete for its manual and semi-automatic flows and is
+installable by anyone (`curl … | install.sh | bash`); 200 tests green.
+Everything that remains is either blocked on real limit-hit data (Phase 1
+detection — the hooks are already capturing) or explicitly deferred
+(Windows, marketplace publishing, Phase 3 polish). All state manipulation
+goes through lib.sh's public API; detection code may only match formats
+documented in docs/HOOK-FINDINGS.md (C1). Keep docs/USER-GUIDE.md in sync
+with any behavior change, and keep the VS Code extension a thin shell.
