@@ -9,9 +9,13 @@
 #   claude-auto-resume [status]                     show this workspace's task
 #   claude-auto-resume start <tier> <description>   track this workspace
 #   claude-auto-resume resume-at [when] [tier] [--session <n|id|latest|new>]
+#                        [--prompt "<text>"] [--workspace <path>]
 #                                                   schedule resume (default: auto,
-#                                                   continuing the newest session)
-#   claude-auto-resume sessions                     list this workspace's Claude
+#                                                   continuing the newest session;
+#                                                   --prompt = custom resume message,
+#                                                   --workspace = another project)
+#   claude-auto-resume sessions [--workspace <path>]
+#                                                   list a workspace's Claude
 #                                                   sessions (pick one to resume)
 #   claude-auto-resume cancel                       cancel tracking
 #   claude-auto-resume list                         all tracked workspaces

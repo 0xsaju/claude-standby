@@ -2,7 +2,7 @@
 
 Living checklist for claude-auto-resume. Update before ending any working
 session. Detailed rationale for every decision: `docs/DECISIONS.md`
-(D1–D23). All dates 2026-07-18 unless noted.
+(D1–D24). All dates 2026-07-18 unless noted.
 
 ## Done
 
@@ -38,9 +38,13 @@ session. Detailed rationale for every decision: `docs/DECISIONS.md`
       `--session <n|id|latest|new>` override; cockpit shows one-click
       session plates in the composer. Plugin 0.3.0, extension 0.5.0.
       (D23)
-- [x] **Test suite: 219 green** — three JSON engines, daemon lifecycle,
-      auto mode, session discovery/pinning, hooks setup/removal,
-      installer cycle, CLI surface.
+- [x] **Full schedule composer** on both surfaces: project select (any
+      workspace, not just the open one), session plates that follow the
+      selected project, custom resume prompt, when/tier — CLI flags
+      `--prompt` / `--workspace` + one-composer cockpit 0.6.0. (D24)
+- [x] **Test suite: 226 green** — three JSON engines, daemon lifecycle,
+      auto mode, session discovery/pinning, prompt/workspace flags,
+      hooks setup/removal, installer cycle, CLI surface.
 
 ## Next
 
@@ -72,7 +76,7 @@ daemon's own probes create session files that would poison any
 "most recent" lookup (D23; this is also why `--continue` is never used).
 Session discovery reads the measured store layout (HOOK-FINDINGS F2)
 read-only; picks flow through `resume-at --session` in both CLI and
-cockpit. 219 tests green. Still pending: verify `--resume` against a real
+cockpit. 226 tests green. Still pending: verify `--resume` against a real
 limit once one hits (C6), plus everything blocked on hook-payload data.
 All state manipulation goes through lib.sh's public API; detection code
 may only match formats documented in docs/HOOK-FINDINGS.md (C1). Keep

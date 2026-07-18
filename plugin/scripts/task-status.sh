@@ -41,6 +41,14 @@ if [ -n "$PROMPT" ]; then
     echo "  prompt     : $PROMPT"
   fi
 fi
+RESUME_PROMPT="$(ar_task_get "$WS" resume_prompt_template)"
+if [ -n "$RESUME_PROMPT" ] && [ "$RESUME_PROMPT" != "$AR_DEFAULT_RESUME_PROMPT" ]; then
+  if [ "${#RESUME_PROMPT}" -gt 72 ]; then
+    echo "  on resume  : ${RESUME_PROMPT:0:72}…"
+  else
+    echo "  on resume  : $RESUME_PROMPT"
+  fi
+fi
 echo "Recent journal:"
 JOURNAL="$(ar_journal_show "$WS" 5)"
 if [ -n "$JOURNAL" ]; then

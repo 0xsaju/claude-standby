@@ -10,7 +10,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck disable=SC1091
 . "$SCRIPT_DIR/lib.sh" || { echo "auto-resume: failed to load lib.sh"; exit 0; }
 
-USAGE='Usage: claude-auto-resume resume-at [when] [critical|normal|low] [--session <n|id|latest|new>]
+USAGE='Usage: claude-auto-resume resume-at [when] [critical|normal|low]
+         [--session <n|id|latest|new>] [--prompt "<text>"] [--workspace <path>]
   [when] accepts:
     (nothing) | auto           auto-detect: probe until the limit lifts,
                                then resume (no reset time needed)
@@ -19,17 +20,27 @@ USAGE='Usage: claude-auto-resume resume-at [when] [critical|normal|low] [--sessi
     2h30m | 45m | 3h           relative from now
     now                        immediately
   --session picks WHICH conversation to continue (see: claude-auto-resume
-  sessions). Default: the newest session in this workspace; "new" starts a
-  fresh one.'
+  sessions). Default: the newest session in the workspace; "new" starts a
+  fresh one.
+  --prompt sets the message the resumed session receives (default:
+  "Limit reset. Continue from where you stopped. Check PROGRESS.md first.")
+  --workspace schedules for another project directory instead of the
+  current one.'
 
-# Pull --session out of the argument list first (position-independent).
+# Pull the flags out of the argument list first (position-independent).
 SESSION_ARG=""
+PROMPT_ARG=""
+WORKSPACE_ARG=""
 ARGS=()
 while [ $# -gt 0 ]; do
   case "$1" in
-    --session)   SESSION_ARG="${2:-latest}"; shift 2 || shift ;;
-    --session=*) SESSION_ARG="${1#--session=}"; shift ;;
-    *)           ARGS+=("$1"); shift ;;
+    --session)     SESSION_ARG="${2:-latest}"; shift 2 || shift ;;
+    --session=*)   SESSION_ARG="${1#--session=}"; shift ;;
+    --prompt)      PROMPT_ARG="${2:-}"; shift 2 || shift ;;
+    --prompt=*)    PROMPT_ARG="${1#--prompt=}"; shift ;;
+    --workspace|-w) WORKSPACE_ARG="${2:-}"; shift 2 || shift ;;
+    --workspace=*) WORKSPACE_ARG="${1#--workspace=}"; shift ;;
+    *)             ARGS+=("$1"); shift ;;
   esac
 done
 set -- ${ARGS[@]+"${ARGS[@]}"}
@@ -99,7 +110,15 @@ if [ -n "${AR_PARSE_ONLY:-}" ]; then
 fi
 
 RESUME_AT="$(ar_epoch_to_iso "$EPOCH")"
-WS="$(pwd)"
+if [ -n "$WORKSPACE_ARG" ]; then
+  if [ ! -d "$WORKSPACE_ARG" ]; then
+    echo "Workspace '$WORKSPACE_ARG' is not a directory."
+    exit 0
+  fi
+  WS="$(cd "$WORKSPACE_ARG" && pwd)"
+else
+  WS="$(pwd)"
+fi
 
 # --- session pinning (HOOK-FINDINGS F2/F3) --------------------------------
 # The daemon resumes with `claude --resume <session_id>` so the ORIGINAL
@@ -140,6 +159,9 @@ else
 fi
 
 FIELDS=("status=waiting" "resume_at=$RESUME_AT" "resume_mode=$RESUME_MODE" "session_id=$SESSION_ID")
+if [ -n "$PROMPT_ARG" ]; then
+  FIELDS+=("resume_prompt_template=$PROMPT_ARG")
+fi
 if ! ar_task_exists "$WS"; then
   # Untracked workspace being scheduled post-hoc: an explicit schedule
   # means "resume without asking", so default importance is critical.
@@ -157,6 +179,9 @@ if [ -n "$SESSION_ID" ]; then
   ar_journal_append "$WS" "session-pinned" "will continue session $(printf '%.8s' "$SESSION_ID") ($SESSION_SOURCE)"
 elif [ "$SESSION_ARG" = "new" ]; then
   ar_journal_append "$WS" "session-pinned" "will start a fresh session (--session new)"
+fi
+if [ -n "$PROMPT_ARG" ]; then
+  ar_journal_append "$WS" "prompt-set" "custom resume prompt: ${PROMPT_ARG:0:60}"
 fi
 ar_log "task-resume-at: ws=$WS mode=$RESUME_MODE resume_at=$RESUME_AT session=${SESSION_ID:-<new>}"
 
@@ -178,6 +203,11 @@ if [ -n "$SESSION_ID" ]; then
   echo "  session    : $(printf '%.8s' "$SESSION_ID") — the original conversation continues (claude --resume)"
 else
   echo "  session    : new chat (no existing session$( [ "$SESSION_ARG" = "new" ] && echo ' — --session new' ))"
+fi
+PROMPT_SHOW="$(ar_task_get "$WS" resume_prompt_template)"
+if [ -n "$PROMPT_SHOW" ]; then
+  if [ "${#PROMPT_SHOW}" -gt 60 ]; then PROMPT_SHOW="${PROMPT_SHOW:0:60}…"; fi
+  echo "  prompt     : $PROMPT_SHOW"
 fi
 echo "  importance : $(ar_task_get "$WS" importance)"
 echo "  daemon     : $([ -n "${AR_NO_DAEMON:-}" ] && echo 'not spawned (AR_NO_DAEMON)' || echo 'running detached, wakes every 60s')"

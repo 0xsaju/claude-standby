@@ -11,6 +11,20 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "$SCRIPT_DIR/lib.sh" || { echo "auto-resume: failed to load lib.sh"; exit 0; }
 
 WS="$(pwd)"
+case "${1:-}" in
+  --workspace|-w)
+    if [ -n "${2:-}" ] && [ -d "$2" ]; then
+      WS="$(cd "$2" && pwd)"
+    else
+      echo "Workspace '${2:-}' is not a directory."
+      exit 0
+    fi
+    ;;
+  --workspace=*)
+    W="${1#--workspace=}"
+    if [ -d "$W" ]; then WS="$(cd "$W" && pwd)"; else echo "Workspace '$W' is not a directory."; exit 0; fi
+    ;;
+esac
 PINNED="$(ar_task_get "$WS" session_id)"
 LINES="$(ar_sessions_list "$WS")"
 

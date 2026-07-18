@@ -145,6 +145,78 @@ function listSessions(ws) {
   }
 }
 
+// The encoded project-dir name is lossy (every non-alphanumeric became
+// "-"), so the true workspace path is recovered from the `cwd` field the
+// session lines carry (HOOK-FINDINGS F2).
+function projectDirCwd(dir) {
+  try {
+    let newest = null;
+    for (const f of fs.readdirSync(dir)) {
+      if (!f.endsWith('.jsonl') || !UUID_RE.test(f.slice(0, -6))) continue;
+      const st = fs.statSync(path.join(dir, f));
+      if (!newest || st.mtimeMs > newest.mtime) newest = { f, mtime: st.mtimeMs };
+    }
+    if (!newest) return undefined;
+    const fd = fs.openSync(path.join(dir, newest.f), 'r');
+    try {
+      const buf = Buffer.alloc(32768);
+      const n = fs.readSync(fd, buf, 0, buf.length, 0);
+      for (const line of buf.toString('utf8', 0, n).split('\n')) {
+        try {
+          const o = JSON.parse(line);
+          if (typeof o.cwd === 'string' && o.cwd) return o.cwd;
+        } catch {
+          /* keep scanning */
+        }
+      }
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    /* unreadable */
+  }
+  return undefined;
+}
+
+// Every schedulable project: the open folder first, then tracked tasks,
+// then anything else with sessions on disk. Cached — this stats/reads a
+// lot of files and collectState runs every few seconds.
+let projectsCache = { at: 0, value: null };
+
+function listProjects(currentWs) {
+  if (projectsCache.value && Date.now() - projectsCache.at < 30000) {
+    const cached = projectsCache.value;
+    return currentWs && !cached.includes(currentWs) ? [currentWs, ...cached] : cached;
+  }
+  const seen = new Set();
+  const out = [];
+  const add = (ws) => {
+    if (ws && !seen.has(ws)) {
+      seen.add(ws);
+      out.push(ws);
+    }
+  };
+  add(currentWs);
+  for (const ws of Object.keys(readAllTasks())) add(ws);
+  try {
+    for (const d of fs.readdirSync(PROJECTS_DIR)) {
+      const p = path.join(PROJECTS_DIR, d);
+      try {
+        if (!fs.statSync(p).isDirectory()) continue;
+      } catch {
+        continue;
+      }
+      const cwd = projectDirCwd(p);
+      if (cwd && fs.existsSync(cwd)) add(cwd);
+      if (out.length >= 12) break;
+    }
+  } catch {
+    /* no session store yet */
+  }
+  projectsCache = { at: Date.now(), value: out };
+  return out;
+}
+
 // -------------------------------------------------------- dashboard state --
 
 let cliFoundCache = { at: 0, value: true };
@@ -209,10 +281,14 @@ function collectState() {
     /* ignore */
   }
   const currentWs = workspacePath();
+  const projects = listProjects(currentWs);
+  const sessionsByWs = {};
+  for (const ws of projects) sessionsByWs[ws] = listSessions(ws);
   return {
     tasks: readAllTasks(),
     currentWs,
-    sessions: listSessions(currentWs),
+    projects,
+    sessionsByWs,
     cliFound: cliFoundCache.value,
     hooksVia,
     daemons,
@@ -221,10 +297,12 @@ function collectState() {
 
 const host = {
   collectState,
-  schedule: async (ws, when, tier, session) => {
+  schedule: async (ws, when, tier, session, prompt) => {
     const args = ['resume-at', when || 'auto'];
     if (tier) args.push(tier);
     if (session) args.push('--session', session);
+    if (prompt) args.push('--prompt', prompt);
+    if (ws) args.push('--workspace', ws);
     const res = await runCli(args, ws);
     if (res.notFound) return offerInstall();
     if (res.code !== 0)
@@ -325,7 +403,13 @@ async function scheduleResume(item) {
     });
     if (!when) return;
   }
-  const res = await runCli(['resume-at', when], cwd);
+  const prompt = await vscode.window.showInputBox({
+    prompt: 'Message for the resumed session (leave empty for the default)',
+    placeHolder: 'Limit reset. Continue from where you stopped. Check PROGRESS.md first.',
+  });
+  const args = ['resume-at', when];
+  if (prompt) args.push('--prompt', prompt);
+  const res = await runCli(args, cwd);
   if (res.notFound) return offerInstall();
   vscode.window.showInformationMessage(
     res.code === 0 ? res.text.split('\n')[0] : `Scheduling failed: ${res.text}`

@@ -157,6 +157,20 @@ claude-auto-resume resume-at auto --session 2
 `new` (deliberately start a fresh chat). The id is pinned at schedule
 time, so the daemon's own probe calls can never hijack "most recent".
 
+You can also choose *what the resumed session is told* and *which project
+this is for* — all in one command:
+
+```text
+claude-auto-resume resume-at auto --session 2 \
+  --prompt "Continue the migration; skip the seeding step we discussed" \
+  --workspace ~/projects/other-app
+```
+
+`--prompt` replaces the default resume message ("Limit reset. Continue
+from where you stopped. Check PROGRESS.md first.") for this task from now
+on; `--workspace` schedules for another project directory without cd-ing
+there.
+
 You can close the terminal. The daemon makes one minimal, near-free `haiku`
 probe call; while limited, that call returns the limit message — whose
 format is measured, e.g. `You've hit your session limit · resets 4:10pm
@@ -218,7 +232,7 @@ task to `waiting` and the journal keeps the full history.
 
 ## 5. Command reference
 
-### `claude-auto-resume resume-at [when] [critical|normal|low] [--session <n|id|latest|new>]`
+### `claude-auto-resume resume-at [when] [critical|normal|low] [--session …] [--prompt …] [--workspace …]`
 
 Schedules an auto-resume for the current workspace and spawns the daemon.
 With no `when` (or `auto`), the daemon probes until the limit lifts and
@@ -234,12 +248,18 @@ reschedule). `--session` overrides — an index from
 for a fresh chat. An unknown value refuses rather than silently starting
 a new conversation.
 
-### `claude-auto-resume sessions`
+`--prompt "<text>"` sets the message delivered to the resumed session
+(stored as the task's resume prompt; omitting it keeps whatever was set
+before, or the default). `--workspace <path>` (or `-w`) schedules for
+another project directory instead of the current one — session pinning
+and `--session` indexes then refer to *that* workspace's sessions.
 
-Lists the current workspace's Claude Code sessions (from
-`~/.claude/projects/`), newest first: pick index, short id, age, size, and
-the first real prompt as a summary. Marks the session currently pinned
-for resume.
+### `claude-auto-resume sessions [--workspace <path>]`
+
+Lists a workspace's Claude Code sessions (from `~/.claude/projects/`;
+default: the current directory), newest first: pick index, short id, age,
+size, and the first real prompt as a summary. Marks the session currently
+pinned for resume.
 
 ### `claude-auto-resume start <critical|normal|low> <task description>`
 

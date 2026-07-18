@@ -58,17 +58,26 @@ user picks from when scheduling.
    ("resumes in 2h 14m 09s"). Second: status. Third: schedule/cancel
    actions. Also shows: tier, auto-detect badge, attempts-used meter,
    task description.
-3. **Schedule composer** — TWO decisions, in this order:
-   a. **Which conversation to continue** — "session plates": selectable
-      cards for the workspace's recent Claude sessions (first-prompt
+3. **Schedule composer** — FOUR decisions, in this order:
+   a. **Which project** — select over every known workspace (open folder
+      preselected and labeled "current"; then tracked tasks; then any
+      other project with sessions on disk).
+   b. **Which conversation to continue** — "session plates": selectable
+      cards for that project's recent Claude sessions (first-prompt
       summary, short id, relative age, size) plus a "New chat" plate.
-      Newest is preselected. This is the product's core promise — the
+      Newest (or the already-pinned one) is preselected; changing the
+      project swaps the plates. This is the product's core promise — the
       user's interrupted conversation survives — so it deserves visual
       weight.
-   b. **When** — presets (Auto-detect · 30m · 1h · 2h30m · Now), custom
+   c. **Prompt on resume** — optional text input; placeholder shows the
+      default ("Limit reset. Continue from where you stopped. Check
+      PROGRESS.md first."). Empty = default.
+   d. **When** — presets (Auto-detect · 30m · 1h · 2h30m · Now), custom
       time input (`20:00`, `45m`, ISO), tier select, confirm.
    Should feel like one gesture, not a form. May be inline-expanding, a
    sheet, or always-visible in the empty state — designer's choice.
+   There is exactly ONE composer on the page; "schedule" affordances on
+   other-workspace cards jump to it with that project preselected.
    The hero also shows which session is currently pinned ("continues
    '<summary>'"); a task with NO pinned session shows a gentle warning
    ("resume would start a new chat").

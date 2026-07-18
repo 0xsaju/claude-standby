@@ -549,6 +549,28 @@ else
 fi
 t_contains "daemon: journal names the session" "bbbbbbbb" "$(ar_journal_show "$SWS" 10)"
 
+# --prompt: custom resume message is stored and delivered verbatim
+(cd "$SWS" && AR_NO_DAEMON=1 bash "$PLUGIN/scripts/task-resume-at.sh" now --session 1 \
+  --prompt "Custom continue: finish step 4 then run the tests" >/dev/null)
+t_eq "prompt: custom prompt stored" "Custom continue: finish step 4 then run the tests" \
+  "$(ar_task_get "$SWS" resume_prompt_template)"
+t_contains "prompt: journaled" "prompt-set" "$(ar_journal_show "$SWS" 5)"
+bash "$PLUGIN/scripts/daemon.sh" "$SWS"
+t_contains "prompt: daemon delivers the custom prompt" "Custom continue: finish step 4" \
+  "$(cat "$SETMP/transcripts/$NEW_ID.jsonl")"
+
+# --workspace: schedule another project without cd-ing into it
+WSB="$SETMP/ws-other"; mkdir -p "$WSB"
+WOUT="$(cd "$SETMP" && AR_NO_DAEMON=1 bash "$PLUGIN/scripts/task-resume-at.sh" 45m --workspace "$WSB")"
+t_contains "workspace flag: confirms" "Resume scheduled." "$WOUT"
+t_eq "workspace flag: task keyed to target dir" "waiting" "$(ar_task_get "$WSB" status)"
+t_contains "workspace flag: bad path refused" "not a directory" \
+  "$(AR_NO_DAEMON=1 bash "$PLUGIN/scripts/task-resume-at.sh" now --workspace "$SETMP/nope")"
+
+# sessions --workspace lists another project's sessions
+t_contains "sessions --workspace" "bbbbbbbb" \
+  "$(cd "$SETMP" && bash "$PLUGIN/scripts/task-sessions.sh" --workspace "$SWS")"
+
 unset CLAUDE_AUTO_RESUME_CLAUDE_BIN CLAUDE_PROJECTS_DIR FAKE_CLAUDE_TRANSCRIPT_DIR FAKE_CLAUDE_MODE
 rm -rf "$SETMP"
 

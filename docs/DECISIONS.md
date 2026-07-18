@@ -271,3 +271,24 @@ F3: `-r/--resume <id>` headless-compatible), then:
 
 state.json schema unchanged (v2 already had `session_id`; it just was
 never written). Plugin 0.3.0, extension 0.5.0.
+
+## D24 — 2026-07-18 — Full schedule composer: project · session · prompt · time
+
+Extended D23's session pinning into the complete scheduling surface, on
+both interfaces. CLI: `resume-at` gains `--prompt "<text>"` (writes
+`resume_prompt_template`, which the daemon already delivered but nothing
+could set) and `--workspace <path>` (schedule any project without cd);
+`sessions` gains `--workspace` to match. Cockpit 0.6.0: the per-card
+composers were replaced by ONE composer — project select (open folder
+first, then tracked tasks, then any project with sessions on disk),
+session plates that swap when the project changes (client-side, from an
+embedded JSON block — no round trip, no lost input state), optional
+prompt field, then when/tier. "Schedule" on other-workspace cards jumps
+to the composer with that project preselected.
+
+Two notable mechanics: (1) the encoded project-dir names in
+`~/.claude/projects` are lossy (`[^A-Za-z0-9] → -`), so real workspace
+paths are recovered from the `cwd` field inside session lines (measured,
+F2) rather than by decoding directory names; (2) plates are built with
+DOM APIs, never innerHTML — summaries are conversation text and must not
+be interpretable as markup. Schema untouched (both fields existed in v2).

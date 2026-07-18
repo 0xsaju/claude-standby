@@ -57,7 +57,7 @@ function attach(webview, host) {
   return webview.onDidReceiveMessage(async (msg) => {
     switch (msg.type) {
       case 'schedule':
-        await host.schedule(msg.ws, msg.when, msg.tier, msg.session);
+        await host.schedule(msg.ws, msg.when, msg.tier, msg.session, msg.prompt);
         break;
       case 'cancel':
         await host.cancel(msg.ws);
@@ -138,59 +138,56 @@ function progressBar(used, max) {
     <div class="meter-label">${used} of ${max} resume attempts used</div>`;
 }
 
-function ago(ms) {
-  const d = Math.max(0, Math.floor((Date.now() - ms) / 1000));
-  if (d < 3600) return `${Math.floor(d / 60)}m ago`;
-  if (d < 86400) return `${Math.floor(d / 3600)}h ago`;
-  return `${Math.floor(d / 86400)}d ago`;
-}
+const DEFAULT_PROMPT =
+  'Limit reset. Continue from where you stopped. Check PROGRESS.md first.';
 
-// Session plates: pick WHICH conversation the daemon resumes with
-// `claude --resume <id>` (the whole point of the tool). Only rendered for
-// the current workspace — other workspaces default to their newest session.
-function sessionPlates(state, ws, task) {
-  if (ws !== state.currentWs || !(state.sessions || []).length) return '';
-  const pinned = task && task.session_id;
-  const pinnedListed = state.sessions.some((s) => s.id === pinned);
-  const plates = state.sessions
-    .map((s, i) => {
-      const selected = pinned ? s.id === pinned : i === 0;
-      return `<button class="plate ${selected ? 'selected' : ''}" data-session="${esc(s.id)}">
-        <span class="plate-title">${esc(s.summary || s.id.slice(0, 8))}</span>
-        <span class="plate-meta">${esc(s.id.slice(0, 8))} · ${esc(ago(s.mtime))} · ${s.sizeKb} KB</span>
-      </button>`;
-    })
+// The one schedule composer. Four decisions, top to bottom: which project,
+// which conversation (plates — rendered client-side from SESSIONS so the
+// project select can swap them without a round trip), what prompt the
+// resumed session receives, and when. All of it lands in one CLI call:
+// `resume-at <when> [tier] --workspace --session --prompt`.
+function scheduleForm(state, defaultWs) {
+  const options = (state.projects || [])
+    .map(
+      (ws) =>
+        `<option value="${esc(ws)}" ${ws === defaultWs ? 'selected' : ''}>${esc(
+          path.basename(ws)
+        )}${ws === state.currentWs ? ' (current)' : ''} — ${esc(ws)}</option>`
+    )
     .join('');
-  return `<div class="plates">
-    <div class="plates-label">Continue which conversation?</div>
-    ${plates}
-    <button class="plate plate-new ${pinned && !pinnedListed ? '' : ''}" data-session="new">
-      <span class="plate-title">New chat</span>
-      <span class="plate-meta">start fresh instead of resuming</span>
-    </button>
-  </div>`;
-}
-
-function scheduleForm(ws, compact, state, task) {
   return `
-  <div class="composer ${compact ? 'compact' : ''}" data-ws="${esc(ws)}">
-    ${sessionPlates(state, ws, task)}
-    <div class="presets">
-      <button class="preset" data-when="auto" title="Probe until the limit lifts, then resume">Auto-detect</button>
-      <button class="preset" data-when="30m">30m</button>
-      <button class="preset" data-when="1h">1h</button>
-      <button class="preset" data-when="2h30m">2h30m</button>
-      <button class="preset" data-when="now">Now</button>
+  <div class="composer" data-ws="${esc(defaultWs || '')}">
+    <div class="c-field">
+      <label>Project</label>
+      <select class="ws-select">${options}</select>
     </div>
-    <div class="custom-row">
-      <input class="custom-when" placeholder="custom: 20:00 · 45m · ISO-8601" />
-      <select class="tier">
-        <option value="">tier: keep</option>
-        <option value="critical">critical</option>
-        <option value="normal">normal</option>
-        <option value="low">low</option>
-      </select>
-      <button class="go primary">Schedule</button>
+    <div class="c-field">
+      <label>Conversation to continue</label>
+      <div class="plates"></div>
+    </div>
+    <div class="c-field">
+      <label>Prompt on resume</label>
+      <input class="prompt-input" placeholder="default: ${esc(DEFAULT_PROMPT)}" />
+    </div>
+    <div class="c-field">
+      <label>When</label>
+      <div class="presets">
+        <button class="preset" data-when="auto" title="Probe until the limit lifts, then resume">Auto-detect reset</button>
+        <button class="preset" data-when="30m">30m</button>
+        <button class="preset" data-when="1h">1h</button>
+        <button class="preset" data-when="2h30m">2h30m</button>
+        <button class="preset" data-when="now">Now</button>
+      </div>
+      <div class="custom-row">
+        <input class="custom-when" placeholder="custom: 20:00 · 45m · ISO-8601" />
+        <select class="tier">
+          <option value="">tier: keep</option>
+          <option value="critical">critical</option>
+          <option value="normal">normal</option>
+          <option value="low">low</option>
+        </select>
+        <button class="go primary">Schedule</button>
+      </div>
     </div>
   </div>`;
 }
@@ -200,7 +197,12 @@ function heroCard(ws, task, state) {
     return `<section class="card hero empty">
       <div class="empty-icon">🗂</div>
       <h2>No folder open</h2>
-      <p>Open a workspace folder to track and resume tasks in it.</p>
+      <p>${
+        (state.projects || []).length
+          ? 'You can still schedule a resume for any project below.'
+          : 'Open a workspace folder to track and resume tasks in it.'
+      }</p>
+      ${(state.projects || []).length ? scheduleForm(state, state.projects[0]) : ''}
     </section>`;
   }
   if (!task) {
@@ -209,7 +211,7 @@ function heroCard(ws, task, state) {
       <h2>Nothing tracked here yet</h2>
       <p class="ws-path">${esc(ws)}</p>
       <p>Hit a usage limit? Schedule a resume and walk away.</p>
-      ${scheduleForm(ws, false, state)}
+      ${scheduleForm(state, ws)}
     </section>`;
   }
   const color = STATUS_COLOR[task.status] || 'var(--vscode-foreground)';
@@ -228,7 +230,8 @@ function heroCard(ws, task, state) {
   } else if (task.status === 'resuming') {
     timing = `<div class="countdown"><span class="count pulse">● session running</span></div>`;
   }
-  const pinnedInfo = (state.sessions || []).find((s) => s.id === task.session_id);
+  const wsSessions = (state.sessionsByWs && state.sessionsByWs[ws]) || [];
+  const pinnedInfo = wsSessions.find((s) => s.id === task.session_id);
   const sessionLine = task.session_id
     ? `<div class="session-line" title="${esc(task.session_id)}">↻ continues “${esc(
         (pinnedInfo && pinnedInfo.summary) || task.session_id.slice(0, 8)
@@ -266,7 +269,7 @@ function heroCard(ws, task, state) {
     </div>
     ${timing}
     ${progressBar(task.resume_count ?? 0, task.max_resumes ?? 3)}
-    <div class="composer-slot" data-ws="${esc(ws)}" hidden>${scheduleForm(ws, true, state, task)}</div>
+    <div class="composer-slot" hidden>${scheduleForm(state, ws)}</div>
   </section>`;
 }
 
@@ -294,7 +297,6 @@ function otherCards(state) {
           <button class="linklike act-schedule" data-ws="${esc(ws)}">schedule</button>
           ${active ? `<button class="linklike danger-text act-cancel" data-ws="${esc(ws)}">cancel</button>` : ''}
         </div>
-        <div class="composer-slot" data-ws="${esc(ws)}" hidden>${scheduleForm(ws, true, state, t)}</div>
       </div>`;
     })
     .join('');
@@ -318,6 +320,19 @@ function timeline(task) {
     )
     .join('');
   return `<h3 class="section-title">Activity</h3><section class="card"><ul class="timeline">${rows}</ul></section>`;
+}
+
+// JSON payload embedded in the page; <-escape so conversation text
+// can never close the script tag.
+function jsonBlock(value) {
+  return JSON.stringify(value).replace(/</g, '\\u003c');
+}
+
+function pinnedByWs(state) {
+  const out = {};
+  for (const [ws, t] of Object.entries(state.tasks || {}))
+    out[ws] = t.session_id || '';
+  return out;
 }
 
 function render(state, opts) {
@@ -437,6 +452,18 @@ function render(state, opts) {
   .plate-title { font-size: 12.5px; font-weight: 600; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .plate-meta { font-size: 10.5px; color: var(--vscode-descriptionForeground); font-variant-numeric: tabular-nums; }
   .composer { margin-top: 16px; text-align: left; }
+  .c-field { margin-bottom: 12px; }
+  .c-field > label {
+    display: block; font-size: 11px; text-transform: uppercase;
+    letter-spacing: .6px; color: var(--vscode-descriptionForeground);
+    margin-bottom: 5px;
+  }
+  .ws-select, .prompt-input {
+    width: 100%; font-family: inherit; font-size: 12px; padding: 6px 10px;
+    border-radius: 6px; border: 1px solid var(--vscode-input-border, transparent);
+    background: var(--vscode-input-background); color: var(--vscode-input-foreground);
+  }
+  .plates-empty { font-size: 11.5px; color: var(--vscode-descriptionForeground); }
   .presets { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
   .preset { padding: 5px 12px; border-radius: 99px; font-size: 12px; }
   .custom-row { display: flex; gap: 8px; }
@@ -512,6 +539,8 @@ function render(state, opts) {
     <span class="statefile">state: ~/.claude/auto-resume/state.json · live</span>
   </footer>
 </div>
+<script type="application/json" id="data-sessions">${jsonBlock(state.sessionsByWs || {})}</script>
+<script type="application/json" id="data-pinned">${jsonBlock(pinnedByWs(state))}</script>
 <script>
   const vscode = acquireVsCodeApi();
   const $ = (s, el) => (el || document).querySelector(s);
@@ -523,36 +552,100 @@ function render(state, opts) {
   $('#openLog').addEventListener('click', () => vscode.postMessage({ type: 'openLog' }));
   $('#openConfig').addEventListener('click', () => vscode.postMessage({ type: 'openConfig' }));
 
-  // schedule/cancel buttons toggle or fire
+  // ---- the composer: project -> session plates -> prompt -> when --------
+  const SESSIONS = JSON.parse(document.getElementById('data-sessions').textContent);
+  const PINNED = JSON.parse(document.getElementById('data-pinned').textContent);
+  const composer = $('.composer');
+
+  function ago(ms) {
+    const d = Math.max(0, Math.floor((Date.now() - ms) / 1000));
+    if (d < 3600) return Math.floor(d / 60) + 'm ago';
+    if (d < 86400) return Math.floor(d / 3600) + 'h ago';
+    return Math.floor(d / 86400) + 'd ago';
+  }
+
+  // Plates are built with DOM APIs (never innerHTML) — summaries are
+  // user-conversation text and must not be interpreted as markup.
+  function makePlate(session, selected) {
+    const b = document.createElement('button');
+    b.className = 'plate' + (selected ? ' selected' : '');
+    b.dataset.session = session ? session.id : 'new';
+    const title = document.createElement('span');
+    title.className = 'plate-title';
+    title.textContent = session ? session.summary || session.id.slice(0, 8) : 'New chat';
+    const meta = document.createElement('span');
+    meta.className = 'plate-meta';
+    meta.textContent = session
+      ? session.id.slice(0, 8) + ' · ' + ago(session.mtime) + ' · ' + session.sizeKb + ' KB'
+      : 'start fresh instead of resuming';
+    b.append(title, meta);
+    b.addEventListener('click', () => {
+      $$('.plate', composer).forEach((x) => x.classList.remove('selected'));
+      b.classList.add('selected');
+    });
+    return b;
+  }
+
+  function renderPlates(ws) {
+    const zone = $('.plates', composer);
+    if (!zone) return;
+    zone.textContent = '';
+    const list = SESSIONS[ws] || [];
+    const pinned = PINNED[ws];
+    const pinnedListed = list.some((s) => s.id === pinned);
+    list.forEach((s, i) =>
+      zone.append(makePlate(s, pinnedListed ? s.id === pinned : i === 0))
+    );
+    zone.append(makePlate(null, !list.length));
+    if (!list.length) {
+      const note = document.createElement('div');
+      note.className = 'plates-empty';
+      note.textContent = 'No Claude sessions found for this project yet — the resume will start a new chat.';
+      zone.append(note);
+    }
+  }
+
+  if (composer) {
+    const wsSelect = $('.ws-select', composer);
+    renderPlates(wsSelect.value);
+    wsSelect.addEventListener('change', () => renderPlates(wsSelect.value));
+    const send = (when) => {
+      const plate = $('.plate.selected', composer);
+      const prompt = $('.prompt-input', composer).value.trim();
+      vscode.postMessage({
+        type: 'schedule',
+        ws: wsSelect.value,
+        when,
+        tier: $('.tier', composer).value,
+        session: plate ? plate.dataset.session : undefined,
+        prompt: prompt || undefined,
+      });
+    };
+    $$('.preset', composer).forEach((p) => p.addEventListener('click', () => send(p.dataset.when)));
+    $('.go', composer).addEventListener('click', () => {
+      const v = $('.custom-when', composer).value.trim();
+      send(v || 'auto');
+    });
+  }
+
+  // schedule buttons open the composer targeted at their workspace
+  $$('.act-schedule').forEach((b) =>
+    b.addEventListener('click', () => {
+      if (!composer) return;
+      const slot = composer.closest('.composer-slot');
+      const fromHero = b.closest('.hero');
+      if (slot) slot.hidden = fromHero ? !slot.hidden : false;
+      const wsSelect = $('.ws-select', composer);
+      if (b.dataset.ws && [...wsSelect.options].some((o) => o.value === b.dataset.ws)) {
+        wsSelect.value = b.dataset.ws;
+        renderPlates(b.dataset.ws);
+      }
+      if (!slot || !slot.hidden) composer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    })
+  );
   $$('.act-cancel').forEach((b) =>
     b.addEventListener('click', () => vscode.postMessage({ type: 'cancel', ws: b.dataset.ws }))
   );
-  $$('.act-schedule').forEach((b) =>
-    b.addEventListener('click', () => {
-      const slot = document.querySelector('.composer-slot[data-ws="' + CSS.escape(b.dataset.ws) + '"]');
-      if (slot) slot.hidden = !slot.hidden;
-    })
-  );
-  $$('.composer').forEach((c) => {
-    const ws = c.dataset.ws;
-    $$('.plate', c).forEach((p) =>
-      p.addEventListener('click', () => {
-        $$('.plate', c).forEach((x) => x.classList.remove('selected'));
-        p.classList.add('selected');
-      })
-    );
-    const send = (when) => {
-      const tier = $('.tier', c).value;
-      const plate = $('.plate.selected', c);
-      const session = plate ? plate.dataset.session : undefined;
-      vscode.postMessage({ type: 'schedule', ws, when, tier, session });
-    };
-    $$('.preset', c).forEach((p) => p.addEventListener('click', () => send(p.dataset.when)));
-    $('.go', c).addEventListener('click', () => {
-      const v = $('.custom-when', c).value.trim();
-      send(v || 'auto');
-    });
-  });
 
   // live countdowns
   function tick() {
@@ -574,4 +667,4 @@ function render(state, opts) {
 </html>`;
 }
 
-module.exports = { createOrShow, resolveSidebar, update };
+module.exports = { createOrShow, resolveSidebar, update, render };
