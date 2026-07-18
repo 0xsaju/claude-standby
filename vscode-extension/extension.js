@@ -116,6 +116,10 @@ function sessionSummary(file) {
       if (typeof c !== 'string') continue;
       c = c.replace(/\s+/g, ' ').trim();
       if (!c || c.startsWith('<command-') || c.startsWith('<local-command')) continue;
+      // First prompts are often markdown — strip heading/list/quote
+      // markers so the summary reads as a title, not source text.
+      c = c.replace(/^[#>*\-–—\s`]+/, '').trim();
+      if (!c) continue;
       return c.slice(0, 90);
     }
   } catch {

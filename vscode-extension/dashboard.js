@@ -187,22 +187,23 @@ function attemptSegs(used, max) {
     <span class="dim">attempt ${used} of ${max}</span></div>`;
 }
 
+const BRAND_SVG_LG = `<svg width="44" height="44" viewBox="0 0 18 18"><circle cx="9" cy="9" r="8" fill="#0B1220"/><path d="M9 4a5 5 0 1 0 5 5" fill="none" stroke="#F59E0B" stroke-width="1.8" stroke-linecap="round"/><path d="M14 3.5v3h-3z" fill="#F59E0B"/></svg>`;
+
 function heroCard(ws, task, state) {
-  if (!ws) {
-    return `<section class="card hero-empty">
-      <h2>No folder open</h2>
-      <p class="dim">${
-        (state.projects || []).length
-          ? 'You can still schedule a resume for any project below.'
-          : 'Open a workspace folder to track and resume tasks in it.'
-      }</p>
-    </section>`;
-  }
-  if (!task) {
-    return `<section class="card hero-empty">
-      <h2>Nothing tracked here yet</h2>
-      <p class="dim mono">${esc(ws)}</p>
-      <p class="dim">Hit a usage limit? Schedule a resume below and walk away.</p>
+  if (!ws || !task) {
+    return `<section class="welcome">
+      ${BRAND_SVG_LG}
+      <h1>Claude Auto-Resume</h1>
+      <p class="dim tagline">Your Claude Code task survives the usage limit —<br>schedule a resume once and walk away.</p>
+      ${
+        ws
+          ? `<p class="dim mono wsline">${esc(ws)}</p>`
+          : `<p class="dim wsline">${
+              (state.projects || []).length
+                ? 'No folder open — you can still schedule for any project below.'
+                : 'Open a workspace folder to get started.'
+            }</p>`
+      }
     </section>`;
   }
   const hue = STATUS_HUE[task.status] || 'desc';
@@ -263,43 +264,52 @@ function heroCard(ws, task, state) {
   </section>`;
 }
 
-function composerSection(state, defaultWs) {
+function composerSection(state, defaultWs, hasTask) {
   if (!(state.projects || []).length) return '';
   const options = state.projects
     .map(
       (ws) =>
         `<option value="${esc(ws)}" ${ws === defaultWs ? 'selected' : ''}>${esc(
           path.basename(ws)
-        )}${ws === state.currentWs ? ' (current)' : ''} — ${esc(ws)}</option>`
+        )}${ws === state.currentWs ? ' (current)' : ''}</option>`
     )
     .join('');
-  return `<h3 class="section-title">Schedule</h3>
-  <div class="composer">
-    <div class="c-row">
-      <select class="ws-select" title="Project">${options}</select>
-      <select class="session-select" title="Conversation to continue"></select>
+  return `<section class="card composer">
+    <div class="c-title">${hasTask ? 'Reschedule' : 'Schedule a resume'}</div>
+    <div class="field">
+      <label>Project</label>
+      <select class="ws-select">${options}</select>
     </div>
-    <div class="c-row">
-      <button class="chip amber" data-when="auto" title="Probe until the limit lifts, then resume">Auto-detect</button>
-      <button class="chip" data-when="30m">30m</button>
-      <button class="chip" data-when="1h">1h</button>
-      <button class="chip" data-when="2h30m">2h30m</button>
-      <button class="chip" data-when="now">Now</button>
-      <input class="custom-when" placeholder="20:00 · 45m · ISO" />
+    <div class="field">
+      <label>Conversation to continue</label>
+      <select class="session-select"></select>
+    </div>
+    <div class="field">
+      <label>Prompt on resume <span class="opt">optional</span></label>
+      <input class="prompt-input" placeholder="${esc(DEFAULT_PROMPT)}" />
+    </div>
+    <div class="field">
+      <label>When</label>
+      <div class="chips">
+        <button class="chip selected" data-when="auto" title="Probe until the limit lifts, then resume">Auto-detect reset</button>
+        <button class="chip" data-when="30m">30m</button>
+        <button class="chip" data-when="1h">1h</button>
+        <button class="chip" data-when="2h30m">2h30m</button>
+        <button class="chip" data-when="now">Now</button>
+        <input class="custom-when" placeholder="20:00 · 45m · ISO" />
+      </div>
+    </div>
+    <div class="c-actions">
       <select class="tier">
         <option value="">tier: keep</option>
         <option value="critical">critical</option>
         <option value="normal">normal</option>
         <option value="low">low</option>
       </select>
-      <button class="go">Schedule</button>
+      <span class="spacer"></span>
+      <button class="go">Schedule resume</button>
     </div>
-    <div class="c-prompt dim">Prompt: <span class="p-current">continue from where you stopped (default)</span>
-      <a class="p-toggle">customize</a></div>
-    <div class="c-prompt-row" hidden>
-      <input class="prompt-input" placeholder="${esc(DEFAULT_PROMPT)}" />
-    </div>
-  </div>`;
+  </section>`;
 }
 
 function otherRows(state) {
@@ -362,14 +372,22 @@ function render(state) {
 <style>
   :root { color-scheme: light dark; }
   * { box-sizing: border-box; }
+  html, body { height: 100%; }
   body {
     font-family: var(--vscode-font-family);
     font-size: 13px;
     color: var(--vscode-foreground);
     background: var(--vscode-editor-background);
     margin: 0;
+    display: flex; flex-direction: column;
   }
-  .wrap { max-width: 780px; margin: 0 auto; padding: 0 16px 20px; }
+  .wrap {
+    width: min(620px, calc(100% - 48px));
+    margin: 0 auto; padding: 28px 0 24px;
+    flex: 1; display: flex; flex-direction: column;
+  }
+  body.centered .wrap { justify-content: center; padding-bottom: 9vh; }
+  .wrap > section + section { margin-top: 20px; }
   .mono { font-family: var(--vscode-editor-font-family, ui-monospace, Menlo, monospace); font-size: .92em; }
   .dim { color: var(--vscode-descriptionForeground); }
   .spacer { flex: 1; }
@@ -443,42 +461,56 @@ function render(state) {
     border: 1px solid var(--vscode-widget-border, rgba(128,128,128,.35));
   }
   button:hover { filter: brightness(1.12); }
-  .hero-empty { text-align: left; }
-  .hero-empty h2 { margin: 0 0 6px; font-size: 14px; }
-  .hero-empty p { margin: 4px 0; font-size: 12px; }
+  .welcome { text-align: center; padding: 8px 0 4px; }
+  .welcome h1 { font-size: 17px; font-weight: 600; margin: 12px 0 6px; letter-spacing: .2px; }
+  .welcome .tagline { font-size: 12.5px; margin: 0; line-height: 1.6; }
+  .welcome .wsline { font-size: 11px; margin: 12px 0 0; }
 
   .section-title {
     font-size: 11px; font-weight: 600; letter-spacing: .6px; text-transform: uppercase;
-    color: var(--vscode-descriptionForeground); margin: 18px 0 8px;
+    color: var(--vscode-descriptionForeground); margin: 22px 0 8px;
   }
-  .composer .c-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 6px; }
+  .composer .c-title { font-size: 13px; font-weight: 600; margin-bottom: 14px; }
+  .field { margin-bottom: 14px; }
+  .field > label {
+    display: block; font-size: 11px; font-weight: 600; letter-spacing: .5px;
+    text-transform: uppercase; color: var(--vscode-descriptionForeground);
+    margin-bottom: 6px;
+  }
+  .field .opt { font-weight: 400; text-transform: none; letter-spacing: 0; opacity: .7; }
   select, .custom-when, .prompt-input {
-    font-family: inherit; font-size: 12px; padding: 4px 8px; border-radius: 3px;
-    border: 1px solid var(--vscode-input-border, transparent);
+    font-family: inherit; font-size: 12.5px; padding: 6px 10px; border-radius: 4px;
+    border: 1px solid var(--vscode-input-border, var(--vscode-widget-border, rgba(128,128,128,.35)));
     background: var(--vscode-input-background); color: var(--vscode-input-foreground);
   }
-  .ws-select { max-width: 55%; }
-  .session-select { flex: 1; min-width: 160px; }
+  .ws-select, .session-select, .prompt-input { width: 100%; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
   .chip {
-    font-size: 12px; padding: 4px 10px; border-radius: 11px; background: transparent;
+    font-size: 12px; padding: 5px 12px; border-radius: 12px; background: transparent;
     border: 1px solid var(--vscode-widget-border, rgba(128,128,128,.35));
-    color: var(--vscode-foreground);
+    color: var(--vscode-foreground); cursor: pointer;
   }
-  .chip.amber { border-color: #F59E0B; color: #F59E0B; }
-  .custom-when { width: 110px; }
-  .go { padding: 4px 12px; }
-  .c-prompt { font-size: 11px; display: flex; gap: 6px; }
-  .c-prompt a { font-size: 11px; }
-  .c-prompt-row { margin-top: 6px; }
-  .prompt-input { width: 100%; }
+  .chip:hover { border-color: var(--vscode-descriptionForeground); }
+  .chip.selected { border-color: #F59E0B; color: #F59E0B; background: rgba(245,158,11,.08); }
+  .custom-when { width: 130px; }
+  .c-actions {
+    display: flex; align-items: center; gap: 10px; margin-top: 4px; padding-top: 14px;
+    border-top: 1px solid var(--vscode-widget-border, rgba(128,128,128,.35));
+  }
+  .go {
+    background: #F59E0B; color: #1a1200; font-weight: 600; border: none;
+    padding: 6px 18px; border-radius: 4px;
+  }
+  .go:hover { filter: brightness(1.08); }
 
-  .wsrows { display: flex; flex-direction: column; gap: 4px; }
+  .wsrows { display: flex; flex-direction: column; gap: 6px; }
   .wsrow {
-    display: flex; align-items: center; gap: 8px; padding: 6px 10px; font-size: 12px;
-    border: 1px solid var(--vscode-widget-border, rgba(128,128,128,.35)); border-radius: 4px;
+    display: flex; align-items: center; gap: 10px; padding: 8px 12px; font-size: 12px;
+    border: 1px solid var(--vscode-widget-border, rgba(128,128,128,.35)); border-radius: 5px;
+    background: var(--vscode-editorWidget-background);
   }
   .wsrow .dot { width: 7px; height: 7px; }
-  .wsrow a { font-size: 11px; }
+  .wsrow a { font-size: 11px; margin-left: 4px; }
   .pulse { animation: pulse 1.6s infinite; }
 
   .timeline { display: flex; flex-direction: column; gap: 7px; font-size: 12px; }
@@ -488,25 +520,25 @@ function render(state) {
   .tl-text { min-width: 0; }
 
   footer {
-    display: flex; gap: 14px; margin-top: 16px; padding-top: 10px; font-size: 11px;
+    display: flex; gap: 14px; margin-top: 28px; padding-top: 12px; font-size: 11px;
     border-top: 1px solid var(--vscode-widget-border, rgba(128,128,128,.35));
     color: var(--vscode-descriptionForeground); align-items: center;
   }
+  body:not(.centered) footer { margin-top: auto; padding-top: 20px; }
   @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
 
   @media (max-width: 480px) {
-    .wrap { padding: 0 12px 16px; }
-    header.top { padding: 8px 12px; margin: 0 -12px 12px; }
-    .card { padding: 12px; }
+    .wrap { width: calc(100% - 24px); padding-top: 16px; }
+    .card { padding: 14px; }
     .hd .mono { display: none; }
     .count { font-size: 28px; }
     .actions button { flex: 1; }
-    .ws-select, .session-select { max-width: none; width: 100%; flex: none; }
+    .c-actions { flex-wrap: wrap; }
     footer .statefile { display: none; }
   }
 </style>
 </head>
-<body>
+<body class="${task ? '' : 'centered'}">
 <header class="top">
   ${BRAND_SVG}
   <span class="name">Claude Auto-Resume</span>
@@ -530,7 +562,7 @@ function render(state) {
         </section>`
   }
   ${heroCard(state.currentWs, task, state)}
-  ${composerSection(state, composerWs)}
+  ${composerSection(state, composerWs, Boolean(task))}
   ${otherRows(state)}
   ${timelineSection(task)}
   <footer>
@@ -593,21 +625,25 @@ function render(state) {
     fillSessions(wsSelect.value);
     wsSelect.addEventListener('change', () => fillSessions(wsSelect.value));
 
-    const promptRow = $('.c-prompt-row', composer);
-    const promptInput = $('.prompt-input', composer);
-    const pCurrent = $('.p-current', composer);
-    $('.p-toggle', composer).addEventListener('click', () => {
-      promptRow.hidden = !promptRow.hidden;
-      if (!promptRow.hidden) promptInput.focus();
-    });
-    promptInput.addEventListener('input', () => {
-      pCurrent.textContent = promptInput.value.trim()
-        ? 'custom — “' + promptInput.value.trim().slice(0, 50) + '”'
-        : 'continue from where you stopped (default)';
+    // "When" chips behave like radio buttons; typing a custom time
+    // deselects them. One primary button submits the whole form.
+    const customWhen = $('.custom-when', composer);
+    $$('.chip', composer).forEach((c) =>
+      c.addEventListener('click', () => {
+        $$('.chip', composer).forEach((x) => x.classList.remove('selected'));
+        c.classList.add('selected');
+        customWhen.value = '';
+      })
+    );
+    customWhen.addEventListener('input', () => {
+      if (customWhen.value.trim())
+        $$('.chip', composer).forEach((x) => x.classList.remove('selected'));
     });
 
-    const send = (when) => {
-      const prompt = promptInput.value.trim();
+    $('.go', composer).addEventListener('click', () => {
+      const chip = $('.chip.selected', composer);
+      const when = customWhen.value.trim() || (chip ? chip.dataset.when : 'auto');
+      const prompt = $('.prompt-input', composer).value.trim();
       vscode.postMessage({
         type: 'schedule',
         ws: wsSelect.value,
@@ -616,11 +652,6 @@ function render(state) {
         session: $('.session-select', composer).value || undefined,
         prompt: prompt || undefined,
       });
-    };
-    $$('.chip', composer).forEach((p) => p.addEventListener('click', () => send(p.dataset.when)));
-    $('.go', composer).addEventListener('click', () => {
-      const v = $('.custom-when', composer).value.trim();
-      send(v || 'auto');
     });
   }
 
