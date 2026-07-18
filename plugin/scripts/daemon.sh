@@ -199,6 +199,20 @@ while :; do
 
   ATTEMPT=$((COUNT + 1))
   if do_resume "$ATTEMPT"; then
+    RESUME_RC=0
+  else
+    RESUME_RC=1
+  fi
+
+  # The user may have cancelled (or rescheduled) while the resume was in
+  # flight — never overwrite a status someone else changed under us.
+  STATUS="$(ar_task_get "$WS" status)"
+  if [ "$STATUS" != "resuming" ]; then
+    ar_journal_append "$WS" "resume-finished" "attempt $ATTEMPT ended after status became '$STATUS' — leaving it"
+    stand_down "status changed to '$STATUS' during resume"
+  fi
+
+  if [ "$RESUME_RC" -eq 0 ]; then
     ar_task_set "$WS" status done
     ar_journal_append "$WS" "done" "resume attempt $ATTEMPT finished cleanly"
     ar_notify "Task finished" "Resumed task in $WS completed."

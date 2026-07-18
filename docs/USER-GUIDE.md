@@ -261,6 +261,7 @@ you.
 |---|---|
 | `~/.claude/auto-resume/state.json` | All task state. Human-readable JSON; safe to inspect, edited only via the commands. |
 | `~/.claude/auto-resume/logs/plugin.log` | Timestamped log of everything: hook firings, daemon ticks, resume attempts, errors. First stop when debugging. |
+| `~/.claude/auto-resume/logs/hook-payloads.log` | Raw hook payloads + transcript tails captured at every session stop (feeds limit-detection development). |
 | `~/.claude/auto-resume/daemons/*.pid` | One pidfile per waiting workspace; auto-removed when the daemon exits. |
 | `~/.claude/auto-resume/config` | Optional configuration (see above). |
 

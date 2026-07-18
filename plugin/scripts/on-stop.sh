@@ -22,6 +22,22 @@ EVENT="${1:-unknown}"
   PAYLOAD="$(cat 2>/dev/null || true)"
   ar_log "on-stop: event=$EVENT payload_bytes=${#PAYLOAD}"
 
+  # Capture the full payload + transcript tail for docs/HOOK-FINDINGS.md —
+  # a limit hit with the plugin installed produces the Phase 1 data
+  # automatically, no separate probe install needed. Logging only; still
+  # fast and always exit 0 (C4).
+  mkdir -p "$AR_LOG_DIR" 2>/dev/null
+  {
+    echo "════ $(ar_now_iso) event=$EVENT"
+    printf '%s\n' "$PAYLOAD"
+    TRANSCRIPT="$(printf '%s' "$PAYLOAD" | sed -n 's/.*"transcript_path"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+    if [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ]; then
+      echo "---- transcript tail (last 40 lines of $TRANSCRIPT) ----"
+      tail -n 40 "$TRANSCRIPT"
+    fi
+    echo ""
+  } >> "$AR_LOG_DIR/hook-payloads.log" 2>/dev/null
+
   detect_limit() {
     # TODO(C1): STUB — always reports "no limit". Implement ONLY against
     # payload/transcript shapes documented in docs/HOOK-FINDINGS.md

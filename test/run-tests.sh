@@ -417,6 +417,17 @@ t_eq "auto: gives up after window" "failed" "$(ar_task_get "$WS9" status)"
 t_contains "auto: give-up journaled" "did not lift" "$(ar_journal_show "$WS9" 5)"
 unset FAKE_CLAUDE_MODE_FILE AR_PROBE_INTERVAL_SECS FAKE_CLAUDE_LIMIT_EXIT FAKE_CLAUDE_RESET_DISPLAY
 
+# cancel while a resume is in flight must not be overwritten by "done"
+WS12="$DTMP/ws-cancel-mid"; mkdir -p "$WS12"
+(cd "$WS12" && AR_NO_DAEMON=1 bash "$PLUGIN/scripts/task-resume-at.sh" now >/dev/null)
+FAKE_CLAUDE_RUN_SECS=3 bash "$PLUGIN/scripts/daemon.sh" "$WS12" &
+DPID=$!
+sleep 1
+ar_task_set "$WS12" status cancelled
+wait "$DPID" 2>/dev/null
+t_eq "daemon: cancel during in-flight resume preserved" "cancelled" "$(ar_task_get "$WS12" status)"
+t_contains "daemon: in-flight cancel journaled" "resume-finished" "$(ar_journal_show "$WS12" 5)"
+
 # daemon: pidfiles cleaned up
 if ls "$DTMP"/daemons/*.pid >/dev/null 2>&1; then
   fail "daemon: pidfiles cleaned up" "$(ls "$DTMP"/daemons/)"
@@ -448,6 +459,12 @@ t_contains "cli: resume-at schedules" "Resume scheduled." "$(cd "$CWS" && AR_NO_
 t_eq "cli: cancel works" "cancelled" "$(ar_task_get "$CWS" status)"
 t_contains "cli: log shows entries" "task-start:" "$(bash "$CLI" log)"
 t_contains "cli: unknown command shows usage" "Usage" "$(bash "$CLI" bogus 2>&1)"
+HOUT="$(bash "$CLI" --help)"
+t_contains "cli: help shows usage" "Usage" "$HOUT"
+case "$HOUT" in
+  *"set -u"*) fail "cli: help leaks no code" "$HOUT" ;;
+  *) ok "cli: help leaks no code" ;;
+esac
 rm -rf "$CTMP"
 
 # --------------------------------------------------------------- installer --
@@ -484,6 +501,7 @@ RC=$?
 t_eq "on-stop: always exits 0" "0" "$RC"
 t_eq "on-stop: no stderr noise" "" "$ERR"
 t_contains "on-stop: logged the event" "event=Stop" "$(cat "$STMP/logs/plugin.log" 2>/dev/null)"
+t_contains "on-stop: payload captured for findings" '"session_id":"abc"' "$(cat "$STMP/logs/hook-payloads.log" 2>/dev/null)"
 ERR="$(printf '' | bash "$PLUGIN/scripts/on-stop.sh" SessionEnd 2>&1 >/dev/null)"
 RC=$?
 t_eq "on-stop: empty payload still exits 0" "0" "$RC"

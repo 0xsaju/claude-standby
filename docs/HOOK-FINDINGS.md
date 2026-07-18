@@ -10,8 +10,15 @@ formats documented here. No invented payload shapes.
 
 ## How to produce the data
 
-Use the instrumentation plugin in `claude-limit-hook-probe/` (see its
-README). Short version:
+**Easiest (since 2026-07-18):** just have the claude-auto-resume plugin
+installed. Its `on-stop.sh` hook automatically appends every Stop/SessionEnd
+payload + a 40-line transcript tail to
+`~/.claude/auto-resume/logs/hook-payloads.log`. After a limit hit, copy the
+entries around that timestamp into **Findings** below.
+
+Alternative: the standalone instrumentation plugin in
+`claude-limit-hook-probe/` (see its README) additionally captures
+SessionStart and Notification events. Short version:
 
 1. Install the probe hooks (copy hook blocks into `~/.claude/settings.json`
    or install the folder as a local plugin).

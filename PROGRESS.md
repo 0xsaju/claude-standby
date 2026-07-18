@@ -80,6 +80,13 @@ Living checklist for claude-auto-resume. Update before ending any session.
   - [x] Slash commands removed — plugin is now a hook sensor only; all
         user-facing strings show CLI syntax; docs restructured around
         the CLI (README, USER-GUIDE §2.1, ARCHITECTURE components)
+- [x] **Live-run fixes** (2026-07-18, from user's first real CLI session)
+  - [x] on-stop.sh now captures full hook payloads + transcript tails to
+        logs/hook-payloads.log — next limit hit produces HOOK-FINDINGS
+        data automatically, no probe install needed
+  - [x] cancel during an in-flight resume is no longer overwritten by
+        done/failed when the claude process finishes
+  - [x] CLI --help no longer leaks a code line; tests 153 → 158
 
 ## In progress
 

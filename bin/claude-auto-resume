@@ -38,7 +38,8 @@ fi
 LOG_FILE="${CLAUDE_AUTO_RESUME_LOG_DIR:-$HOME/.claude/auto-resume/logs}/plugin.log"
 
 usage() {
-  sed -n '4,17p' "$SELF" | sed 's/^# \{0,1\}//'
+  # Print the header comment block (from line 4) up to the first non-comment.
+  awk 'NR > 3 { if ($0 !~ /^#/) exit; sub(/^# ?/, ""); print }' "$SELF"
 }
 
 CMD="${1:-status}"
