@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 # claude-auto-resume — zero-token terminal CLI (D15).
 #
-# The /task-* slash commands cost a small model turn and, more importantly,
-# CANNOT run while you are rate-limited. This CLI fronts the exact same
-# scripts with zero token cost and works at any time — it is the intended
-# interface while limited.
+# The primary interface for claude-auto-resume: zero token cost, and works
+# while rate-limited (when no in-session command could run). The plugin
+# part of this repo contributes only the hooks (automatic detection).
 #
 # Usage:
 #   claude-auto-resume [status]                     show this workspace's task

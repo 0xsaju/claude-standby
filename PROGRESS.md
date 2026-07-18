@@ -74,6 +74,12 @@ Living checklist for claude-auto-resume. Update before ending any session.
         tarball fallback without git, --uninstall (keeps runtime state)
   - [x] Installer test cycle (install → run via symlink → update →
         uninstall) offline against the local clone; tests 145 → 153
+- [x] **Open source + CLI-first consolidation** (2026-07-18, D17)
+  - [x] Repo made public by user; curl-pipe-bash installer verified live
+        against the real GitHub URL (install → run → status)
+  - [x] Slash commands removed — plugin is now a hook sensor only; all
+        user-facing strings show CLI syntax; docs restructured around
+        the CLI (README, USER-GUIDE §2.1, ARCHITECTURE components)
 
 ## In progress
 
@@ -97,11 +103,6 @@ Living checklist for claude-auto-resume. Update before ending any session.
 - [ ] **Native Windows:** Task Scheduler one-shot at resume time instead
       of the sleep-loop daemon (same approach later → launchd/cron
       reboot-surviving schedules on macOS/Linux)
-- [ ] **Open-sourcing:** user to flip the GitHub repo public — the
-      install.sh one-liner in README works from that moment
-- [ ] Consider dropping the /task-* slash commands (CLI covers them;
-      plugin's real value is the hook sensor — user leaning yes, awaiting
-      final call)
 
 ## Handoff note (Phase 0+2 → real-world test / Phase 1)
 

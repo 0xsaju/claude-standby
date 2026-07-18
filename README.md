@@ -9,7 +9,7 @@ with context, and without you babysitting a terminal.
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey)
 ![Status](https://img.shields.io/badge/status-alpha-orange)
-![Tests](https://img.shields.io/badge/tests-119%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-153%20passing-brightgreen)
 
 ---
 
@@ -37,31 +37,31 @@ loop: schedule once, walk away, come back to a finished task.
 
 | Feature | Description |
 |---|---|
-| **Automatic reset detection** | Just run `/task-resume-at` — the daemon probes once, reads the reset time straight out of the limit message, and resumes at exactly that moment. No reset time to look up. |
-| **Post-limit scheduling** | Know the reset time? `/task-resume-at 20:00` resumes exactly then — no probing, no pre-registration needed. |
+| **Automatic reset detection** | Just run `claude-auto-resume resume-at` — the daemon probes once, reads the reset time straight out of the limit message, and resumes at exactly that moment. No reset time to look up. |
+| **Post-limit scheduling** | Know the reset time? `claude-auto-resume resume-at 20:00` resumes exactly then — no probing, no pre-registration needed. |
 | **Importance tiers** | `critical` resumes with no questions asked, `normal` gives you a 60-second window to object, `low` just notifies you. |
 | **Suspend-safe waiting** | The daemon wakes every 60 s and compares wall-clock time, so a closed laptop lid doesn't break the schedule. |
 | **Context-aware resume** | Resume prompts point the session at your `PROGRESS.md` so it picks up where it left off. |
 | **Safety rails** | Bounded retries (`max_resumes`), exponential-style backoff when a resume bounces off a still-active limit, cancel at any time, no dangerous permission flags unless you opt in. |
-| **Editor-agnostic** | It's a Claude Code plugin: works from a terminal, SSH, JetBrains, or VS Code. A dedicated VS Code UI is planned. |
+| **CLI-first, editor-agnostic** | A zero-token terminal CLI that works even while rate-limited, wherever you run Claude Code — terminal, SSH, JetBrains, VS Code. A small plugin adds detection hooks; a VS Code UI is planned. |
 
 ## How it works
 
 ```mermaid
 stateDiagram-v2
-    [*] --> waiting : /task-resume-at <time>
+    [*] --> waiting : claude-auto-resume resume-at <time>
     waiting --> resuming : reset time reached\n(per importance tier)
     resuming --> done : session finishes cleanly
     resuming --> waiting : still limited → back off, retry\n(bounded by max_resumes)
     resuming --> failed : max_resumes exhausted
-    waiting --> cancelled : /task-cancel
+    waiting --> cancelled : claude-auto-resume cancel
     waiting --> [*]
     done --> [*]
     failed --> [*]
 ```
 
 1. **You schedule** a resume for the current workspace — typically right
-   after seeing the limit message: `/task-resume-at 2h30m`.
+   after seeing the limit message: `claude-auto-resume resume-at 2h30m`.
 2. **A detached daemon** starts and sleeps in 60-second ticks until the
    reset time. It re-reads state every tick, so cancelling or rescheduling
    takes effect within a minute.
@@ -73,7 +73,7 @@ stateDiagram-v2
 Everything the daemon knows lives in one file,
 `~/.claude/auto-resume/state.json`, which is also the contract any UI
 (status bar, future VS Code extension) reads. Actions and outcomes are
-journaled per task; `/task-status` shows the timeline.
+journaled per task; `claude-auto-resume status` shows the timeline.
 
 ## Quick start
 
@@ -87,17 +87,18 @@ Windows via WSL/Git Bash is best-effort for now).
 curl -fsSL https://raw.githubusercontent.com/0xsaju/claude-auto-resume/main/install.sh | bash
 ```
 
-Optionally add the in-session slash commands and (future) automatic
-detection hooks — inside Claude Code:
+Optionally install the plugin part — its only job is the hooks that will
+provide fully automatic limit detection (in development) — inside Claude
+Code:
 
 ```text
 /plugin marketplace add ~/.claude-auto-resume
 /plugin install claude-auto-resume@auto-resume
 ```
 
-The CLI matters more than it looks: **while you're rate-limited, Claude
-can't answer, so slash commands don't work — the CLI always does, at zero
-token cost.**
+The CLI is deliberately the primary interface: it costs zero tokens and
+works **while you're rate-limited** — the one moment when nothing that
+needs a model turn can run.
 
 Then, the day a limit hits you mid-task:
 
@@ -108,14 +109,10 @@ claude-auto-resume status       # watch it
 claude-auto-resume cancel       # changed your mind
 ```
 
-The `/task-resume-at`, `/task-status`, `/task-cancel`, and `/task-start`
-slash commands do the same things from inside a session when you have
-quota (each costs one small model turn).
-
 Or track a task up front so it carries an importance tier:
 
-```text
-/task-start critical Migrate the billing service to the new API
+```sh
+claude-auto-resume start critical "Migrate the billing service to the new API"
 ```
 
 Full walkthroughs, configuration, and troubleshooting: see the
@@ -123,17 +120,16 @@ Full walkthroughs, configuration, and troubleshooting: see the
 
 ## Command reference
 
-Every command exists in both forms: slash command (in-session, costs one
-small model turn, unavailable while limited) and terminal CLI (zero tokens,
-always available).
+All commands operate on the current directory's task (alias suggestion:
+`alias car='claude-auto-resume'`).
 
-| Slash command | CLI equivalent | What it does |
-|---|---|---|
-| `/task-resume-at [when] [tier]` | `claude-auto-resume resume-at [when] [tier]` | Schedule an auto-resume. No `when` = auto-detect the reset. Accepts `auto`, `20:00`, `2h30m`, `45m`, ISO-8601, `now`. |
-| `/task-start <tier> <prompt>` | `claude-auto-resume start <tier> <prompt>` | Track this workspace as a resumable task (`critical` \| `normal` \| `low`). |
-| `/task-status` | `claude-auto-resume status` | Show status, schedule, attempts, recent journal. |
-| `/task-cancel` | `claude-auto-resume cancel` | Cancel; a pending resume stands down within one tick. |
-| — | `claude-auto-resume log [n]` / `watch` | Show / follow the daemon log. |
+| Command | What it does |
+|---|---|
+| `resume-at [when] [tier]` | Schedule an auto-resume. No `when` = auto-detect the reset. Accepts `auto`, `20:00`, `2h30m`, `45m`, ISO-8601, `now`. |
+| `start <tier> <description>` | Track this workspace as a resumable task (`critical` \| `normal` \| `low`). |
+| `status` | Show status, schedule, attempts, recent journal. (Default when no command given.) |
+| `cancel` | Cancel; a pending resume stands down within one tick. |
+| `log [n]` / `watch` | Show / follow the daemon log. |
 
 ## Documentation
 
@@ -151,11 +147,11 @@ deliberately unimplemented until measured.
 
 | Capability | Status |
 |---|---|
-| Automatic reset detection (probe-based, `/task-resume-at`) | ✅ Implemented, tested |
+| Automatic reset detection (probe-based, `claude-auto-resume resume-at`) | ✅ Implemented, tested |
 | Reset-time parsing from the limit message (measured format, F1) | ✅ Implemented, tested |
-| Scheduled resume at a known time (`/task-resume-at 20:00`) | ✅ Implemented, tested |
+| Scheduled resume at a known time (`claude-auto-resume resume-at 20:00`) | ✅ Implemented, tested |
 | Resume daemon (tiers, backoff, safety rails) | ✅ Implemented, tested |
-| Task tracking + journal (`/task-start`, `/task-status`, `/task-cancel`) | ✅ Implemented, tested |
+| Task tracking + journal (`claude-auto-resume start`, `claude-auto-resume status`, `claude-auto-resume cancel`) | ✅ Implemented, tested |
 | Instant limit detection via hooks (exact reset time, zero probe cost) | 🔬 Blocked on probe data — see below |
 | One-command installer + zero-token terminal CLI | ✅ Implemented, tested |
 | Resume-verification fallback prompt | 🕐 Planned |
@@ -190,10 +186,11 @@ caps), and hook smoke tests. All iterative testing runs against
 never spends real quota.
 
 ```text
-plugin/                  the Claude Code plugin
+bin/                     the terminal CLI (primary interface)
+install.sh               curl-pipe-bash installer
+plugin/                  Claude Code plugin — the detection sensor
 ├── .claude-plugin/      manifest
 ├── hooks/               Stop/SessionEnd wiring (detection entry point)
-├── commands/            slash commands
 └── scripts/             lib.sh · daemon.sh · task-*.sh · on-stop.sh
 test/                    fake-claude stub + test suite
 docs/                    user guide, architecture, decisions, findings

@@ -21,7 +21,8 @@ claude-auto-resume. For design internals, see
 
 ## 1. Requirements
 
-- **Claude Code** with plugin support
+- **Claude Code** (the `claude` CLI; plugin support only needed for the
+  optional detection hooks)
 - **bash** (any modern version; the scripts avoid GNU-only and BSD-only
   constructs)
 - **macOS or Linux**. Windows via Git Bash or WSL is best-effort:
@@ -42,59 +43,41 @@ Re-running the same command updates the install. Uninstall with
 `... | bash -s -- --uninstall` (your task state and logs are kept unless
 you delete `~/.claude/auto-resume` yourself).
 
-Then, optionally, add the in-session pieces from inside Claude Code:
+Verify:
 
-```text
-/plugin marketplace add 0xsaju/claude-auto-resume
-/plugin install claude-auto-resume@auto-resume
+```sh
+cd ~/any/project
+claude-auto-resume status
 ```
 
-Or from a local clone:
+You should see "No tracked task for this workspace". If the command isn't
+found, `~/.local/bin` isn't on your PATH — the installer printed the line
+to add. Suggested alias for your shell rc: `alias car='claude-auto-resume'`.
 
-```text
-/plugin marketplace add /path/to/claude-auto-resume
-/plugin install claude-auto-resume@auto-resume
-```
-
-Restart Claude Code (or run `/reload-plugins`), then verify:
-
-```text
-/task-status
-```
-
-You should see "No tracked task for this workspace" — that means the plugin
-is installed and reachable. If the plugin flow differs in your Claude Code
-version, consult `/plugin` help; the marketplace manifest lives at
-`.claude-plugin/marketplace.json` in this repo.
-
-If you skipped the one-command installer (e.g. working from your own
-clone), link the CLI manually:
+If you'd rather work from your own clone, skip the installer and link the
+CLI manually:
 
 ```sh
 ln -s /path/to/claude-auto-resume/bin/claude-auto-resume ~/.local/bin/
-alias car='claude-auto-resume'   # optional, in your shell rc
 ```
 
-### 2.1 Slash commands vs. the terminal CLI
+### 2.1 The optional plugin (detection hooks)
 
-The two interfaces drive the exact same scripts and state:
+The CLI is the whole control surface. The Claude Code plugin in this repo
+contributes one thing: **hooks** that will detect a limit hit the moment it
+happens — unattended, with the session id — and schedule the resume with no
+human action. That detection is still in development (it's built only
+against measured hook data), but you can install the plugin now so it's in
+place when it lights up:
 
-| | Slash commands (`/task-*`) | Terminal CLI (`claude-auto-resume …`) |
-|---|---|---|
-| Token cost | One small model turn per call (the script runs locally, but Claude relays its output) | **Zero** |
-| Works while rate-limited | **No** — model turns are unavailable | **Yes** |
-| Where | Inside a Claude Code session | Any terminal |
-
-Practical rule: use slash commands casually while you have quota; use the
-CLI when you've just hit a limit — which is the moment this tool exists
-for:
-
-```sh
-cd ~/my/project
-claude-auto-resume resume-at        # auto-detect the reset and resume
-claude-auto-resume status           # check on it
-claude-auto-resume watch            # follow the daemon log live
+```text
+/plugin marketplace add ~/.claude-auto-resume
+/plugin install claude-auto-resume@auto-resume
 ```
+
+(From a clone, use its path instead of `~/.claude-auto-resume`.) The
+plugin adds no commands and costs no tokens; its hooks log to
+`~/.claude/auto-resume/logs/plugin.log` and always exit cleanly.
 
 ## 3. Core concepts
 
@@ -106,7 +89,7 @@ directory Claude Code is running in.
 | Tier | At reset time |
 |---|---|
 | `critical` | Resumes immediately, no confirmation. |
-| `normal` | Sends a notification, waits 60 seconds, then resumes — unless you `/task-cancel` inside that window. |
+| `normal` | Sends a notification, waits 60 seconds, then resumes — unless you `claude-auto-resume cancel` inside that window. |
 | `low` | Sends a notification only. You resume manually. |
 
 **The daemon.** Scheduling spawns a small background process that survives
@@ -132,16 +115,13 @@ notified, nothing runs again until you reschedule.
 
 ### 4.1 You just hit a limit (the common case)
 
-Being limited means Claude can't answer — so slash commands won't work
-right now. Use the terminal CLI from the project directory:
+Claude can't answer while you're limited — but the CLI doesn't need it.
+From the project directory:
 
 ```sh
 cd ~/my/project
 claude-auto-resume resume-at
 ```
-
-(If you still have quota — e.g. scheduling ahead of time — the equivalent
-slash command is `/task-resume-at`.)
 
 Output:
 
@@ -165,7 +145,7 @@ If you'd rather resume at an exact time (slightly cheaper — zero probe
 calls — and precise to the minute), pass it explicitly:
 
 ```text
-/task-resume-at 20:00
+claude-auto-resume resume-at 20:00
 ```
 
 | Input | Meaning |
@@ -176,8 +156,8 @@ calls — and precise to the minute), pass it explicitly:
 | `2026-07-18T20:00:00+0600` | Exact ISO-8601 timestamp |
 | `now` | Immediately (useful for "just try again") |
 
-A tier argument works with either form: `/task-resume-at normal` (auto
-mode) or `/task-resume-at 20:00 normal`. A task scheduled on a previously
+A tier argument works with either form: `claude-auto-resume resume-at normal` (auto
+mode) or `claude-auto-resume resume-at 20:00 normal`. A task scheduled on a previously
 untracked workspace defaults to `critical` — you explicitly asked for a
 resume, so it doesn't ask again.
 
@@ -189,32 +169,32 @@ fix — you get a notification saying exactly that.
 ### 4.2 Track a long task before starting it
 
 ```text
-/task-start critical Migrate the billing service to the new API
+claude-auto-resume start critical Migrate the billing service to the new API
 ```
 
 This registers the workspace with a tier and your task description. Today,
-tracking gives you `/task-status` bookkeeping and means a later
-`/task-resume-at` keeps the tier and prompt you chose. Once automatic
+tracking gives you `claude-auto-resume status` bookkeeping and means a later
+`claude-auto-resume resume-at` keeps the tier and prompt you chose. Once automatic
 detection ships, tracked tasks are the ones that will self-schedule at the
 moment a limit hits, with no manual step.
 
 ### 4.3 Watch, cancel, reschedule
 
 ```text
-/task-status      # status, tier, attempts used, resume time, journal
-/task-cancel      # daemon stands down within one tick (≤ 60s)
-/task-resume-at 22:15   # reschedule — the running daemon picks it up
+claude-auto-resume status      # status, tier, attempts used, resume time, journal
+claude-auto-resume cancel      # daemon stands down within one tick (≤ 60s)
+claude-auto-resume resume-at 22:15   # reschedule — the running daemon picks it up
 ```
 
 ### 4.4 After a failure
 
-If `/task-status` shows `failed` (cap exhausted or unparseable state), fix
-the cause, then reschedule with `/task-resume-at <when>` — that resets the
+If `claude-auto-resume status` shows `failed` (cap exhausted or unparseable state), fix
+the cause, then reschedule with `claude-auto-resume resume-at <when>` — that resets the
 task to `waiting` and the journal keeps the full history.
 
 ## 5. Command reference
 
-### `/task-resume-at [when] [critical|normal|low]`
+### `claude-auto-resume resume-at [when] [critical|normal|low]`
 
 Schedules an auto-resume for the current workspace and spawns the daemon.
 With no `when` (or `auto`), the daemon probes until the limit lifts and
@@ -223,22 +203,26 @@ workspace wasn't tracked (default tier `critical`); otherwise keeps the
 existing tier unless you pass one. Re-running it reschedules — the running
 daemon picks up the change within one tick.
 
-### `/task-start <critical|normal|low> <task description>`
+### `claude-auto-resume start <critical|normal|low> <task description>`
 
 Registers the current workspace as a tracked task with status `running`.
 Resets the attempt counter. Does not spawn a daemon (nothing to wait for
 yet).
 
-### `/task-status`
+### `claude-auto-resume status`
 
 Shows status, tier, attempts used / cap, resume time (if scheduled), the
 task prompt, and the last journal entries.
 
-### `/task-cancel`
+### `claude-auto-resume cancel`
 
 Sets the task to `cancelled` and journals it. The daemon notices on its
 next tick and stands down. Cancelling during a `normal` tier's 60-second
 grace window aborts that resume.
+
+### `claude-auto-resume log [n]` / `claude-auto-resume watch`
+
+Show the last `n` lines (default 40) of the tool's log, or follow it live.
 
 ## 6. Configuration
 
@@ -290,7 +274,7 @@ lines → the daemon never started (see next item). Lines ending in
 **Is the daemon alive?**
 `cat ~/.claude/auto-resume/daemons/*.pid` and `ps -p <pid>`. If the machine
 rebooted while waiting, the daemon died with it — re-arm with
-`/task-resume-at <when>`. (Reboot-surviving schedules are on the roadmap.)
+`claude-auto-resume resume-at <when>`. (Reboot-surviving schedules are on the roadmap.)
 
 **Resume ran but the session did nothing useful.**
 Check `last_output_tail` in state.json and your `PROGRESS.md`. Headless
@@ -298,11 +282,11 @@ sessions can't ask for permissions — if the tail shows permission refusals,
 set an allowlist (section 6).
 
 **It keeps retrying and failing.**
-The journal (via `/task-status`) shows each attempt's reason. A resume that
+The journal (via `claude-auto-resume status`) shows each attempt's reason. A resume that
 bounces off a still-active limit backs off automatically; hitting the cap
 means the reset time you gave was too optimistic — schedule later.
 
-**`/task-status` says no task, but I scheduled one.**
+**`claude-auto-resume status` says no task, but I scheduled one.**
 Commands key by directory. Run them from the same directory you scheduled
 from.
 
@@ -316,8 +300,8 @@ without you having to be present. Weekly caps are unaffected by anything
 this tool does.
 
 **Does scheduling have to happen before the limit hits?** No — that's the
-main flow: run `/task-resume-at` *after* the limit, and you don't even need
-to know the reset time. Pre-tracking with `/task-start` just adds
+main flow: run `claude-auto-resume resume-at` *after* the limit, and you don't even need
+to know the reset time. Pre-tracking with `claude-auto-resume start` just adds
 bookkeeping and (soon) hook-based instant detection.
 
 **What do the auto-mode probes cost?** Failed probes (limit still active)

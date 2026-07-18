@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# task-resume-at.sh — backend for /task-resume-at <when> [importance]
+# task-resume-at.sh — backend for `claude-auto-resume resume-at`
 #
 # Post-limit scheduling: run this AFTER a limit already hit. No detection
 # is needed — you read the reset time off the limit message yourself, and
@@ -10,7 +10,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck disable=SC1091
 . "$SCRIPT_DIR/lib.sh" || { echo "auto-resume: failed to load lib.sh"; exit 0; }
 
-USAGE='Usage: /task-resume-at [when] [critical|normal|low]
+USAGE='Usage: claude-auto-resume resume-at [when] [critical|normal|low]
   [when] accepts:
     (nothing) | auto           auto-detect: probe until the limit lifts,
                                then resume (no reset time needed)
@@ -21,7 +21,7 @@ USAGE='Usage: /task-resume-at [when] [critical|normal|low]
 
 WHEN="${1:-auto}"
 IMP="${2:-}"
-# allow "/task-resume-at critical" (tier only, auto-detect implied)
+# allow "resume-at critical" (tier only, auto-detect implied)
 case "$WHEN" in
   critical|normal|low)
     IMP="$WHEN"
@@ -118,5 +118,5 @@ else
 fi
 echo "  importance : $(ar_task_get "$WS" importance)"
 echo "  daemon     : $([ -n "${AR_NO_DAEMON:-}" ] && echo 'not spawned (AR_NO_DAEMON)' || echo 'running detached, wakes every 60s')"
-echo "Cancel any time with /task-cancel. Watch with /task-status."
+echo "Cancel any time with: claude-auto-resume cancel   Watch: claude-auto-resume status"
 exit 0

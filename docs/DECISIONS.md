@@ -164,3 +164,16 @@ product, plugin's long-term value is the hook sensor (unattended detection
 support deferred: the plan is a Task Scheduler one-shot at resume time
 instead of a ported sleep-loop daemon, which also opens the door to
 launchd/cron reboot-surviving schedules on macOS/Linux.
+
+## D17 — 2026-07-18 — Slash commands removed; plugin is a hook sensor only
+
+Follow-through on D15's role split, confirmed by the user ("if the CLI
+alone solves it, why the plugin?"): the four /task-* command files are
+deleted. They duplicated the CLI, cost a model turn per use, and could not
+run in the one state the tool exists for (rate-limited). The plugin now
+ships exactly one thing — the Stop/SessionEnd hooks — whose value the CLI
+cannot replicate: unattended detection at the moment a session stops, with
+the session_id for a true --resume. The task-*.sh scripts remain as the
+CLI's backends; user-facing strings now show CLI syntax. Users who
+installed the earlier plugin build should reinstall (or /plugin update) to
+drop the stale commands.

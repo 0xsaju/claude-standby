@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# task-status.sh — backend for /task-status
+# task-status.sh — backend for `claude-auto-resume status`
 set -u
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "$SCRIPT_DIR/lib.sh" || { echo "auto-resume: failed to load lib.sh"; exit 0; }
@@ -8,7 +8,7 @@ WS="$(pwd)"
 STATUS="$(ar_task_get "$WS" status)"
 if [ -z "$STATUS" ]; then
   echo "No tracked task for this workspace ($WS)."
-  echo "Start one with: /task-start <critical|normal|low> <task description>"
+  echo "Start one with: claude-auto-resume start <critical|normal|low> <task description>"
   exit 0
 fi
 

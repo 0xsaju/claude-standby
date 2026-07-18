@@ -8,13 +8,25 @@ the babysitting: it detects the limit hit, waits until the reset time, and
 resumes the same session with proper context — with behavior graded by task
 importance.
 
-## Two components, one contract
+## Components, one contract
 
-### Engine — Claude Code plugin (`plugin/`)
+### Engine — portable scripts + daemon (`plugin/scripts/`)
 
-Editor-agnostic. Hooks detect session stops; a detached daemon owns the
-wait-and-resume cycle. Works for terminal / SSH / JetBrains / VS Code users
-alike. This is phase 1 and lives in this repo now.
+All the logic: state access (lib.sh), the wait-and-resume daemon, the
+task commands. Editor-agnostic plain bash.
+
+### Control surface — terminal CLI (`bin/claude-auto-resume`)
+
+The primary interface (D15/D17): a thin dispatcher over the engine
+scripts. Zero token cost, and works while rate-limited — when nothing
+needing a model turn can run.
+
+### Sensor — Claude Code plugin hooks (`plugin/hooks/`, `on-stop.sh`)
+
+The plugin's only job: hooks fire when a session stops, which is the one
+mechanism that can detect a limit hit unattended and capture the
+session_id for a true `--resume`. Detection logic is stubbed until
+HOOK-FINDINGS has the payload data (C1).
 
 ### Cockpit — VS Code extension (`vscode-extension/`)
 
@@ -59,10 +71,10 @@ Schema changes require a `version` bump and an entry in `docs/DECISIONS.md`.
 
 Field notes:
 
-- **workspace key** — the absolute working directory at `/task-start` time;
+- **workspace key** — the absolute working directory at `claude-auto-resume start` time;
   one tracked task per workspace (see DECISIONS D3).
 - **session_id** — filled from hook payloads once a session stops (hooks
-  receive it; slash commands don't). Empty until then.
+  receive it; the CLI has no way to know it). Empty until then.
 - **resume_at** — ISO-8601 with timezone so the daemon compares wall clock
   unambiguously across suspend/resume. In `auto` mode it holds the *next
   probe time* instead of a known reset time (D13).
@@ -81,10 +93,10 @@ The daemon doesn't care *who* decided a resume is needed — it only reads
 state. Two things write that state:
 
 1. **Manual scheduling (implemented — D10):** the user saw the limit
-   message and runs `/task-resume-at <when>`. The command sets
+   message and runs `claude-auto-resume resume-at <when>`. The command sets
    `status=waiting` + `resume_at` and spawns the daemon. No detection
    involved; the human is the detector.
-2. **Probe-based auto detection (implemented — D13):** `/task-resume-at`
+2. **Probe-based auto detection (implemented — D13):** `claude-auto-resume resume-at`
    with no time. The daemon fires a minimal `claude -p "ok" --model haiku`
    every 30 min; while limited it fails, and the first success means the
    limit has provably reset — exit-code-only, so C1 is untouched. Bounded
@@ -100,7 +112,7 @@ decouples them.
 
 ## Lifecycle loop
 
-1. User starts a tracked task: `/task-start <importance> <prompt>`.
+1. User starts a tracked task: `claude-auto-resume start <importance> <prompt>`.
 2. Session runs. If the limit hits, the session stops → **Stop/SessionEnd
    hook** fires → `on-stop.sh` inspects the transcript tail.
 3. Not a limit? Mark the task done. Limit? Write resume state (`limit-hit`,

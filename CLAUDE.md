@@ -16,8 +16,9 @@ contract = `~/.claude/auto-resume/state.json`.
   (fallback chain: jq → python3 → awk/sed on canonical layout), no GNU-only
   flags without a BSD alternative. Target Linux + macOS; Windows best-effort.
 - **C3 — Plugin layout.** Manifest only in `plugin/.claude-plugin/`;
-  `hooks/`, `commands/`, `scripts/` at plugin root; hook command paths use
-  `${CLAUDE_PLUGIN_ROOT}`.
+  `hooks/`, `scripts/` at plugin root; hook command paths use
+  `${CLAUDE_PLUGIN_ROOT}`. The plugin is a hook sensor only — no slash
+  commands (D17); the CLI (`bin/claude-auto-resume`) is the interface.
 - **C4 — Hooks never break the host.** Every hook script always `exit 0`,
   finishes fast (< 2s typical), logs to its own log, never stderr noise.
 - **C5 — Safety rails.** `max_resumes` enforced; stuck detection; permission
@@ -32,9 +33,11 @@ contract = `~/.claude/auto-resume/state.json`.
 - `plugin/scripts/daemon.sh` — detached wait-and-resume daemon (tiers,
   backoff, max_resumes, pidfile per workspace)
 - `plugin/scripts/on-stop.sh` — Stop/SessionEnd hook entry (detection stub)
-- `plugin/scripts/task-*.sh` — backends for the /task-* slash commands
+- `plugin/scripts/task-*.sh` — command backends
   (task-resume-at.sh = manual post-limit scheduling, D10)
-- `plugin/hooks/hooks.json`, `plugin/commands/*.md` — plugin wiring
+- `bin/claude-auto-resume` — the CLI, primary interface (D15/D17)
+- `install.sh` — curl-pipe-bash installer (D16)
+- `plugin/hooks/hooks.json` — hook wiring (the plugin's only job)
 - `.claude-plugin/marketplace.json` — local/GitHub install manifest
 - `test/fake-claude.sh` — claude CLI stub; `test/run-tests.sh` — test suite
 - `docs/USER-GUIDE.md` — user manual (keep in sync with behavior changes)

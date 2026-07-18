@@ -87,7 +87,7 @@ say "  claude-auto-resume resume-at    # after a limit hit: auto-detect reset + 
 say "  claude-auto-resume status       # this workspace's task"
 say "  claude-auto-resume watch        # follow the daemon log"
 say ""
-say "Optional — slash commands + future automatic detection, inside Claude Code:"
+say "Optional — automatic limit-detection hooks (in development), inside Claude Code:"
 say "  /plugin marketplace add $INSTALL_DIR"
 say "  /plugin install claude-auto-resume@auto-resume"
 say ""

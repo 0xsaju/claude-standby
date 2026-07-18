@@ -7,7 +7,8 @@
 # Loop: wake every $AR_DAEMON_TICK_SECS (default 60), re-read state, compare
 # wall clock against resume_at — never one long sleep, because laptop
 # suspend breaks it. Stands down the moment status is no longer "waiting"
-# (that is how /task-cancel stops a pending resume: state is the channel).
+# (that is how `claude-auto-resume cancel` stops a pending resume: state
+# is the channel).
 #
 # Safety rails (C5): max_resumes enforced; failed resume attempts back off
 # (AR_BACKOFF_BASE_SECS * attempt) instead of hammering; importance tiers:
@@ -186,7 +187,7 @@ while :; do
       stand_down "low importance: notified only"
       ;;
     normal)
-      ar_notify "Claude limit reset" "Auto-resuming task in $WS in ${GRACE}s. Run /task-cancel to stop it."
+      ar_notify "Claude limit reset" "Auto-resuming task in $WS in ${GRACE}s. Stop it with: claude-auto-resume cancel"
       sleep "$GRACE"
       STATUS="$(ar_task_get "$WS" status)"
       [ "$STATUS" = "waiting" ] || stand_down "status changed to '$STATUS' during grace window"
@@ -207,7 +208,7 @@ while :; do
   if [ "$ATTEMPT" -ge "$MAX" ]; then
     ar_task_set "$WS" status failed
     ar_journal_append "$WS" "failed" "attempt $ATTEMPT exited nonzero; max_resumes reached"
-    ar_notify "Auto-resume failed" "Task in $WS failed after $ATTEMPT attempts. See /task-status."
+    ar_notify "Auto-resume failed" "Task in $WS failed after $ATTEMPT attempts. See: claude-auto-resume status"
     stand_down "final attempt failed"
   fi
 
