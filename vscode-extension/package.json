@@ -2,8 +2,9 @@
   "name": "claude-auto-resume-cockpit",
   "displayName": "Claude Auto-Resume Cockpit",
   "description": "Status bar and controls for claude-auto-resume: auto-resume Claude Code tasks after usage-limit hits. Pure UI — the terminal tool does all the work.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "0xsaju",
+  "icon": "icon.png",
   "license": "MIT",
   "repository": {
     "type": "git",
