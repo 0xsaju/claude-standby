@@ -135,3 +135,16 @@ HOOK-FINDINGS F1, the first C1-compliant detection surface. Implemented:
 - fake-claude's stdout fixture re-pointed to the measured format per D5
   (transcript format remains a guess); `FAKE_CLAUDE_LIMIT_EXIT` emulates
   either exit-code behavior in tests.
+
+## D15 — 2026-07-18 — Terminal CLI (`bin/claude-auto-resume`) as the zero-token, works-while-limited interface
+
+User observation: slash commands consume a model turn (the `!` bash runs
+locally free, but its output is injected into context and Claude relays
+it) — and, worse, model turns are unavailable exactly when this tool
+matters: while rate-limited. `/task-resume-at` therefore cannot be invoked
+at the moment it exists for. Resolution: `bin/claude-auto-resume`
+(suggested alias `car`) fronts the same task-*.sh scripts with zero tokens
+and no Claude Code session — status | start | resume-at | cancel | log |
+watch. Slash commands stay for convenience when unlimited; the CLI is the
+documented path while limited. Command scripts now also ar_log their
+actions for a terminal-visible audit trail.

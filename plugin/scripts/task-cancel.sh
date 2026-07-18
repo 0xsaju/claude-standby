@@ -22,5 +22,6 @@ if ! ar_task_set "$WS" status cancelled; then
   exit 0
 fi
 ar_journal_append "$WS" "cancelled" "was: $STATUS"
+ar_log "task-cancel: ws=$WS (was $STATUS)"
 echo "Cancelled tracked task in $WS (was: $STATUS). Any pending auto-resume will stand down."
 exit 0

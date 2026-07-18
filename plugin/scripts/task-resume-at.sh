@@ -100,6 +100,7 @@ if ! ar_task_upsert "$WS" "${FIELDS[@]}"; then
   exit 0
 fi
 ar_journal_append "$WS" "scheduled" "resume at $RESUME_AT"
+ar_log "task-resume-at: ws=$WS mode=$RESUME_MODE resume_at=$RESUME_AT"
 
 if [ -z "${AR_NO_DAEMON:-}" ]; then
   nohup bash "$SCRIPT_DIR/daemon.sh" "$WS" >/dev/null 2>&1 &

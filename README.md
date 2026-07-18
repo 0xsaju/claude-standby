@@ -86,14 +86,26 @@ Requires Claude Code with plugin support, bash, and macOS or Linux
 /plugin install claude-auto-resume@auto-resume
 ```
 
+And link the terminal CLI somewhere on your PATH — **while you're
+rate-limited, Claude can't answer, so slash commands don't work; the CLI
+always does, at zero token cost**:
+
+```sh
+ln -s /path/to/claude-auto-resume/bin/claude-auto-resume ~/bin/
+```
+
 Then, the day a limit hits you mid-task:
 
-```text
-/task-resume-at              # auto-detect the reset and resume (default)
-/task-resume-at 20:00        # or resume exactly when your window resets
-/task-status                 # watch it
-/task-cancel                 # changed your mind
+```sh
+cd ~/my/project
+claude-auto-resume resume-at    # auto-detect the reset and resume
+claude-auto-resume status       # watch it
+claude-auto-resume cancel       # changed your mind
 ```
+
+The `/task-resume-at`, `/task-status`, `/task-cancel`, and `/task-start`
+slash commands do the same things from inside a session when you have
+quota (each costs one small model turn).
 
 Or track a task up front so it carries an importance tier:
 
@@ -106,12 +118,17 @@ Full walkthroughs, configuration, and troubleshooting: see the
 
 ## Command reference
 
-| Command | What it does |
-|---|---|
-| `/task-resume-at [when] [tier]` | Schedule an auto-resume for this workspace. No arguments = auto-detect the reset by probing. `[when]` accepts `auto`, `20:00`, `2h30m`, `45m`, full ISO-8601, or `now`. |
-| `/task-start <tier> <prompt>` | Track this workspace as a resumable task (`critical` \| `normal` \| `low`). |
-| `/task-status` | Show status, resume schedule, attempt count, and recent journal. |
-| `/task-cancel` | Cancel tracking; any pending auto-resume stands down within one tick. |
+Every command exists in both forms: slash command (in-session, costs one
+small model turn, unavailable while limited) and terminal CLI (zero tokens,
+always available).
+
+| Slash command | CLI equivalent | What it does |
+|---|---|---|
+| `/task-resume-at [when] [tier]` | `claude-auto-resume resume-at [when] [tier]` | Schedule an auto-resume. No `when` = auto-detect the reset. Accepts `auto`, `20:00`, `2h30m`, `45m`, ISO-8601, `now`. |
+| `/task-start <tier> <prompt>` | `claude-auto-resume start <tier> <prompt>` | Track this workspace as a resumable task (`critical` \| `normal` \| `low`). |
+| `/task-status` | `claude-auto-resume status` | Show status, schedule, attempts, recent journal. |
+| `/task-cancel` | `claude-auto-resume cancel` | Cancel; a pending resume stands down within one tick. |
+| — | `claude-auto-resume log [n]` / `watch` | Show / follow the daemon log. |
 
 ## Documentation
 

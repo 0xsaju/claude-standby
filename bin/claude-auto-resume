@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# claude-auto-resume — zero-token terminal CLI (D15).
+#
+# The /task-* slash commands cost a small model turn and, more importantly,
+# CANNOT run while you are rate-limited. This CLI fronts the exact same
+# scripts with zero token cost and works at any time — it is the intended
+# interface while limited.
+#
+# Usage:
+#   claude-auto-resume [status]                     show this workspace's task
+#   claude-auto-resume start <tier> <description>   track this workspace
+#   claude-auto-resume resume-at [when] [tier]      schedule resume (default: auto)
+#   claude-auto-resume cancel                       cancel tracking
+#   claude-auto-resume log [n]                      last n log lines (default 40)
+#   claude-auto-resume watch                        follow the log live
+#
+# Suggested alias:  alias car='claude-auto-resume'
+set -u
+
+# Resolve symlinks so `ln -s .../bin/claude-auto-resume ~/bin/` works.
+SELF="$0"
+while [ -L "$SELF" ]; do
+  DIR="$(cd "$(dirname "$SELF")" && pwd)"
+  SELF="$(readlink "$SELF")"
+  case "$SELF" in
+    /*) ;;
+    *) SELF="$DIR/$SELF" ;;
+  esac
+done
+SELF_DIR="$(cd "$(dirname "$SELF")" && pwd)"
+
+SCRIPTS_DIR="${CLAUDE_AUTO_RESUME_PLUGIN_DIR:-$SELF_DIR/../plugin}/scripts"
+if [ ! -f "$SCRIPTS_DIR/lib.sh" ]; then
+  echo "claude-auto-resume: plugin scripts not found at $SCRIPTS_DIR"
+  echo "Set CLAUDE_AUTO_RESUME_PLUGIN_DIR to the plugin directory."
+  exit 1
+fi
+
+LOG_FILE="${CLAUDE_AUTO_RESUME_LOG_DIR:-$HOME/.claude/auto-resume/logs}/plugin.log"
+
+usage() {
+  sed -n '4,17p' "$SELF" | sed 's/^# \{0,1\}//'
+}
+
+CMD="${1:-status}"
+if [ $# -gt 0 ]; then shift; fi
+
+case "$CMD" in
+  status)
+    exec bash "$SCRIPTS_DIR/task-status.sh" ;;
+  start)
+    exec bash "$SCRIPTS_DIR/task-start.sh" "$@" ;;
+  resume-at|resume)
+    exec bash "$SCRIPTS_DIR/task-resume-at.sh" "$@" ;;
+  cancel)
+    exec bash "$SCRIPTS_DIR/task-cancel.sh" ;;
+  log)
+    if [ -f "$LOG_FILE" ]; then
+      exec tail -n "${1:-40}" "$LOG_FILE"
+    fi
+    echo "No log yet at $LOG_FILE"
+    exit 0 ;;
+  watch)
+    touch "$LOG_FILE" 2>/dev/null
+    exec tail -f "$LOG_FILE" ;;
+  help|-h|--help)
+    usage
+    exit 0 ;;
+  *)
+    echo "claude-auto-resume: unknown command '$CMD'"
+    echo
+    usage
+    exit 1 ;;
+esac

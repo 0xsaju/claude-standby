@@ -60,6 +60,14 @@ Living checklist for claude-auto-resume. Update before ending any session.
   - [x] fake-claude stdout re-pointed to measured format (D5);
         FAKE_CLAUDE_LIMIT_EXIT + FAKE_CLAUDE_RESET_DISPLAY test knobs;
         tests 129 → 138, all green
+- [x] **Zero-token terminal CLI** (2026-07-18, D15) — user caught that
+      slash commands cost a model turn AND can't run while limited
+  - [x] `bin/claude-auto-resume` (status|start|resume-at|cancel|log|watch),
+        symlink-safe, same scripts/state as the slash commands
+  - [x] command scripts now ar_log their actions; tests 138 → 145
+  - [x] README/USER-GUIDE: CLI-first guidance for the limited state
+  - [x] Plugin verified installed via local marketplace by user
+        (/plugin marketplace add + install + /reload-plugins)
 
 ## In progress
 

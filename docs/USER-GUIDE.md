@@ -45,7 +45,7 @@ Or from a local clone:
 /plugin install claude-auto-resume@auto-resume
 ```
 
-Restart Claude Code (or start a new session), then verify:
+Restart Claude Code (or run `/reload-plugins`), then verify:
 
 ```text
 /task-status
@@ -55,6 +55,35 @@ You should see "No tracked task for this workspace" — that means the plugin
 is installed and reachable. If the plugin flow differs in your Claude Code
 version, consult `/plugin` help; the marketplace manifest lives at
 `.claude-plugin/marketplace.json` in this repo.
+
+**Also set up the terminal CLI** (strongly recommended — see
+[§2.1](#21-slash-commands-vs-the-terminal-cli)):
+
+```sh
+ln -s /path/to/claude-auto-resume/bin/claude-auto-resume ~/bin/  # or anywhere on PATH
+alias car='claude-auto-resume'   # optional, in your shell rc
+```
+
+### 2.1 Slash commands vs. the terminal CLI
+
+The two interfaces drive the exact same scripts and state:
+
+| | Slash commands (`/task-*`) | Terminal CLI (`claude-auto-resume …`) |
+|---|---|---|
+| Token cost | One small model turn per call (the script runs locally, but Claude relays its output) | **Zero** |
+| Works while rate-limited | **No** — model turns are unavailable | **Yes** |
+| Where | Inside a Claude Code session | Any terminal |
+
+Practical rule: use slash commands casually while you have quota; use the
+CLI when you've just hit a limit — which is the moment this tool exists
+for:
+
+```sh
+cd ~/my/project
+claude-auto-resume resume-at        # auto-detect the reset and resume
+claude-auto-resume status           # check on it
+claude-auto-resume watch            # follow the daemon log live
+```
 
 ## 3. Core concepts
 
@@ -92,11 +121,16 @@ notified, nothing runs again until you reschedule.
 
 ### 4.1 You just hit a limit (the common case)
 
-In that session (or a new one in the same directory), just run:
+Being limited means Claude can't answer — so slash commands won't work
+right now. Use the terminal CLI from the project directory:
 
-```text
-/task-resume-at
+```sh
+cd ~/my/project
+claude-auto-resume resume-at
 ```
+
+(If you still have quota — e.g. scheduling ahead of time — the equivalent
+slash command is `/task-resume-at`.)
 
 Output:
 

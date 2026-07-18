@@ -32,6 +32,7 @@ if ! ar_task_upsert "$WS" \
   exit 0
 fi
 ar_journal_append "$WS" "task-started" "importance=$IMPORTANCE"
+ar_log "task-start: ws=$WS importance=$IMPORTANCE"
 
 echo "Auto-resume is now tracking this workspace."
 echo "  workspace  : $WS"

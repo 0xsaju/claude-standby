@@ -427,6 +427,29 @@ fi
 unset CLAUDE_AUTO_RESUME_CLAUDE_BIN FAKE_CLAUDE_TRANSCRIPT_DIR FAKE_CLAUDE_MODE
 rm -rf "$DTMP"
 
+# -------------------------------------------------------------- cli wrapper --
+
+CTMP="$(mktemp -d "${TMPDIR:-/tmp}/ar-test-XXXXXX")"
+CTMP="$(cd "$CTMP" && pwd)"
+export CLAUDE_AUTO_RESUME_STATE="$CTMP/state.json"
+export CLAUDE_AUTO_RESUME_LOG_DIR="$CTMP/logs"
+export AR_NOTIFY_SILENT=1
+unset AR_JSON_ENGINE
+. "$PLUGIN/scripts/lib.sh"
+CLI="$HERE/../bin/claude-auto-resume"
+CWS="$CTMP/cli-ws"; mkdir -p "$CWS"
+
+t_contains "cli: status with no task" "No tracked task" "$(cd "$CWS" && bash "$CLI" status)"
+t_contains "cli: default command is status" "No tracked task" "$(cd "$CWS" && bash "$CLI")"
+(cd "$CWS" && bash "$CLI" start normal "cli smoke task" >/dev/null)
+t_eq "cli: start tracks task" "normal" "$(ar_task_get "$CWS" importance)"
+t_contains "cli: resume-at schedules" "Resume scheduled." "$(cd "$CWS" && AR_NO_DAEMON=1 bash "$CLI" resume-at 30m)"
+(cd "$CWS" && bash "$CLI" cancel >/dev/null)
+t_eq "cli: cancel works" "cancelled" "$(ar_task_get "$CWS" status)"
+t_contains "cli: log shows entries" "task-start:" "$(bash "$CLI" log)"
+t_contains "cli: unknown command shows usage" "Usage" "$(bash "$CLI" bogus 2>&1)"
+rm -rf "$CTMP"
+
 # ---------------------------------------------------------- on-stop smoke --
 
 STMP="$(mktemp -d "${TMPDIR:-/tmp}/ar-test-XXXXXX")"
