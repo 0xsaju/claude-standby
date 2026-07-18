@@ -292,3 +292,21 @@ paths are recovered from the `cwd` field inside session lines (measured,
 F2) rather than by decoding directory names; (2) plates are built with
 DOM APIs, never innerHTML — summaries are conversation text and must not
 be interpretable as markup. Schema untouched (both fields existed in v2).
+
+## D25 — 2026-07-18 — Dashboard visual direction: design option 1a "VS Code native"
+
+The user iterated the dashboard in Claude design (project "Claude
+Auto-Resume Dashboard", file `Dashboard Options.dc.html`), producing
+three directions: 1a VS Code native, 1b operator console, 1c calm
+center, plus 1d (narrow-width collapse). We implemented **1a** with 1d's
+collapse and 1b's colored timeline glyphs. Why 1a: it reads as a
+first-class VS Code panel (flat widgets, small type, theme variables
+everywhere), its always-visible composer maps 1:1 to the four-step
+schedule flow, and its select-based session picker scales better than
+plates for workspaces with many sessions. 1b's mono-console styling and
+1c's sentence composer were more opinionated and fragile at narrow
+widths. Notable mock→real adaptations: hardcoded `--ch-*` colors became
+`var(--vscode-charts-*, fallback)`; the mock's static "2h 14m 09s"
+became the live 1s countdown; attempts became real max_resumes segments;
+the session/prompt selects bind to the measured session store (F2) and
+`resume-at --session/--prompt`. Extension 0.7.0.

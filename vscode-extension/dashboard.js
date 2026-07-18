@@ -1,24 +1,27 @@
 // Dashboard webview for Claude Auto-Resume Cockpit.
 // Pure presentation: receives a state snapshot from extension.js, renders
-// cards, and posts user intents back — all writes still go through the CLI.
+// the page, and posts user intents back — all writes still go through the
+// CLI. Visual direction: option 1a ("VS Code native") of the Claude
+// design project "Claude Auto-Resume Dashboard", with 1d's narrow-width
+// collapse and 1b's colored timeline glyphs.
 'use strict';
 
 const vscode = require('vscode');
 const path = require('path');
 
-const STATUS_COLOR = {
-  waiting: 'var(--vscode-charts-yellow)',
-  resuming: 'var(--vscode-charts-blue)',
-  running: 'var(--vscode-charts-blue)',
-  'limit-hit': 'var(--vscode-charts-orange)',
-  done: 'var(--vscode-charts-green)',
-  failed: 'var(--vscode-charts-red)',
-  cancelled: 'var(--vscode-descriptionForeground)',
+const STATUS_HUE = {
+  waiting: 'yellow',
+  resuming: 'blue',
+  running: 'blue',
+  'limit-hit': 'orange',
+  done: 'green',
+  failed: 'red',
+  cancelled: 'desc',
 };
 
 const STATUS_LABEL = {
   waiting: 'Waiting',
-  resuming: 'Resuming…',
+  resuming: 'Resuming',
   running: 'Tracked',
   'limit-hit': 'Limit hit',
   done: 'Done',
@@ -26,24 +29,30 @@ const STATUS_LABEL = {
   cancelled: 'Cancelled',
 };
 
-const EVENT_ICON = {
-  scheduled: '📅',
-  'limit-hit': '🚧',
-  'limit-lifted': '🟢',
-  'reset-detected': '🕐',
-  resumed: '▶️',
-  'resume-failed': '↩️',
-  'resume-finished': '⏹',
-  'reset-reached': '🔔',
-  done: '✅',
-  failed: '❌',
-  cancelled: '⃠',
-  'task-started': '🏁',
-  'session-pinned': '📌',
+const EVENT_GLYPH = {
+  scheduled: ['◔', 'yellow'],
+  'session-pinned': ['◎', 'desc'],
+  'prompt-set': ['✎', 'desc'],
+  'limit-hit': ['▲', 'orange'],
+  'limit-lifted': ['●', 'green'],
+  'reset-detected': ['◔', 'blue'],
+  'reset-reached': ['●', 'yellow'],
+  resumed: ['▶', 'blue'],
+  'resume-failed': ['↻', 'red'],
+  'resume-finished': ['■', 'desc'],
+  done: ['✓', 'green'],
+  failed: ['✗', 'red'],
+  cancelled: ['⃠', 'desc'],
+  'task-started': ['●', 'blue'],
 };
 
+const DEFAULT_PROMPT =
+  'Limit reset. Continue from where you stopped. Check PROGRESS.md first.';
+
+const BRAND_SVG = `<svg width="18" height="18" viewBox="0 0 18 18"><circle cx="9" cy="9" r="8" fill="#0B1220"/><path d="M9 4a5 5 0 1 0 5 5" fill="none" stroke="#F59E0B" stroke-width="1.8" stroke-linecap="round"/><path d="M14 3.5v3h-3z" fill="#F59E0B"/></svg>`;
+
 let panel; // singleton tab panel
-let sidebarView; // webview view in the activity-bar sidebar
+let sidebarView; // launcher view in the activity-bar sidebar
 
 function esc(s) {
   return String(s ?? '')
@@ -99,7 +108,7 @@ function createOrShow(context, host) {
   panel.onDidDispose(() => {
     panel = undefined;
   });
-  panel.webview.html = render(host.collectState(), { compact: false });
+  panel.webview.html = render(host.collectState());
   return panel;
 }
 
@@ -147,210 +156,10 @@ function resolveSidebar(webviewView, host) {
 }
 
 function update(host) {
-  if (panel) panel.webview.html = render(host.collectState(), { compact: false });
+  if (panel) panel.webview.html = render(host.collectState());
 }
 
-function chip(ok, okText, badText) {
-  const color = ok
-    ? 'var(--vscode-charts-green)'
-    : 'var(--vscode-charts-orange)';
-  return `<span class="chip"><span class="dot" style="background:${color}"></span>${esc(
-    ok ? okText : badText
-  )}</span>`;
-}
-
-function progressBar(used, max) {
-  const pct = Math.min(100, Math.round((used / Math.max(1, max)) * 100));
-  return `
-    <div class="meter" title="${used} of ${max} resume attempts used">
-      <div class="meter-fill" style="width:${pct}%"></div>
-    </div>
-    <div class="meter-label">${used} of ${max} resume attempts used</div>`;
-}
-
-const DEFAULT_PROMPT =
-  'Limit reset. Continue from where you stopped. Check PROGRESS.md first.';
-
-// The one schedule composer. Four decisions, top to bottom: which project,
-// which conversation (plates — rendered client-side from SESSIONS so the
-// project select can swap them without a round trip), what prompt the
-// resumed session receives, and when. All of it lands in one CLI call:
-// `resume-at <when> [tier] --workspace --session --prompt`.
-function scheduleForm(state, defaultWs) {
-  const options = (state.projects || [])
-    .map(
-      (ws) =>
-        `<option value="${esc(ws)}" ${ws === defaultWs ? 'selected' : ''}>${esc(
-          path.basename(ws)
-        )}${ws === state.currentWs ? ' (current)' : ''} — ${esc(ws)}</option>`
-    )
-    .join('');
-  return `
-  <div class="composer" data-ws="${esc(defaultWs || '')}">
-    <div class="c-field">
-      <label>Project</label>
-      <select class="ws-select">${options}</select>
-    </div>
-    <div class="c-field">
-      <label>Conversation to continue</label>
-      <div class="plates"></div>
-    </div>
-    <div class="c-field">
-      <label>Prompt on resume</label>
-      <input class="prompt-input" placeholder="default: ${esc(DEFAULT_PROMPT)}" />
-    </div>
-    <div class="c-field">
-      <label>When</label>
-      <div class="presets">
-        <button class="preset" data-when="auto" title="Probe until the limit lifts, then resume">Auto-detect reset</button>
-        <button class="preset" data-when="30m">30m</button>
-        <button class="preset" data-when="1h">1h</button>
-        <button class="preset" data-when="2h30m">2h30m</button>
-        <button class="preset" data-when="now">Now</button>
-      </div>
-      <div class="custom-row">
-        <input class="custom-when" placeholder="custom: 20:00 · 45m · ISO-8601" />
-        <select class="tier">
-          <option value="">tier: keep</option>
-          <option value="critical">critical</option>
-          <option value="normal">normal</option>
-          <option value="low">low</option>
-        </select>
-        <button class="go primary">Schedule</button>
-      </div>
-    </div>
-  </div>`;
-}
-
-function heroCard(ws, task, state) {
-  if (!ws) {
-    return `<section class="card hero empty">
-      <div class="empty-icon">🗂</div>
-      <h2>No folder open</h2>
-      <p>${
-        (state.projects || []).length
-          ? 'You can still schedule a resume for any project below.'
-          : 'Open a workspace folder to track and resume tasks in it.'
-      }</p>
-      ${(state.projects || []).length ? scheduleForm(state, state.projects[0]) : ''}
-    </section>`;
-  }
-  if (!task) {
-    return `<section class="card hero empty">
-      <div class="empty-icon">💤</div>
-      <h2>Nothing tracked here yet</h2>
-      <p class="ws-path">${esc(ws)}</p>
-      <p>Hit a usage limit? Schedule a resume and walk away.</p>
-      ${scheduleForm(state, ws)}
-    </section>`;
-  }
-  const color = STATUS_COLOR[task.status] || 'var(--vscode-foreground)';
-  const label = STATUS_LABEL[task.status] || task.status;
-  const auto = task.resume_mode === 'auto';
-  const active = ['waiting', 'resuming', 'running'].includes(task.status);
-  let timing = '';
-  if (task.status === 'waiting' && task.resume_at) {
-    timing = `
-      <div class="countdown" data-deadline="${esc(task.resume_at)}">
-        <span class="count">—</span>
-        <span class="count-sub">${
-          auto ? 'until the next limit probe' : 'until resume'
-        } · ${esc(task.resume_at)}</span>
-      </div>`;
-  } else if (task.status === 'resuming') {
-    timing = `<div class="countdown"><span class="count pulse">● session running</span></div>`;
-  }
-  const wsSessions = (state.sessionsByWs && state.sessionsByWs[ws]) || [];
-  const pinnedInfo = wsSessions.find((s) => s.id === task.session_id);
-  const sessionLine = task.session_id
-    ? `<div class="session-line" title="${esc(task.session_id)}">↻ continues “${esc(
-        (pinnedInfo && pinnedInfo.summary) || task.session_id.slice(0, 8)
-      )}” <span class="session-id">${esc(task.session_id.slice(0, 8))}</span></div>`
-    : active
-      ? `<div class="session-line warn">⚠ no session pinned — resume would start a new chat (pick one below)</div>`
-      : '';
-  return `<section class="card hero">
-    <div class="hero-top">
-      <div>
-        <div class="status-line">
-          <span class="status-dot" style="background:${color}"></span>
-          <span class="status-word" style="color:${color}">${esc(label)}</span>
-          <span class="badge">${esc(task.importance)}</span>
-          ${auto ? '<span class="badge alt">auto-detect</span>' : ''}
-        </div>
-        <div class="ws-path">${esc(ws)}</div>
-        ${
-          task.original_prompt
-            ? `<div class="prompt">“${esc(task.original_prompt.slice(0, 140))}”</div>`
-            : ''
-        }
-        ${sessionLine}
-      </div>
-      <div class="hero-actions">
-        <button class="primary act-schedule" data-ws="${esc(ws)}">${
-          active ? 'Reschedule' : 'Schedule resume'
-        }</button>
-        ${
-          active
-            ? `<button class="danger act-cancel" data-ws="${esc(ws)}">Cancel</button>`
-            : ''
-        }
-      </div>
-    </div>
-    ${timing}
-    ${progressBar(task.resume_count ?? 0, task.max_resumes ?? 3)}
-    <div class="composer-slot" hidden>${scheduleForm(state, ws)}</div>
-  </section>`;
-}
-
-function otherCards(state) {
-  const others = Object.entries(state.tasks).filter(
-    ([ws]) => ws !== state.currentWs
-  );
-  if (!others.length) return '';
-  const cards = others
-    .map(([ws, t]) => {
-      const color = STATUS_COLOR[t.status] || 'var(--vscode-foreground)';
-      const active = ['waiting', 'resuming', 'running'].includes(t.status);
-      return `<div class="card mini">
-        <div class="mini-head">
-          <span class="status-dot" style="background:${color}"></span>
-          <span class="mini-name" title="${esc(ws)}">${esc(path.basename(ws))}</span>
-          <span class="mini-status" style="color:${color}">${esc(
-            STATUS_LABEL[t.status] || t.status
-          )}</span>
-        </div>
-        <div class="mini-sub">${esc(t.importance)} · ${t.resume_count ?? 0}/${
-          t.max_resumes ?? 3
-        } attempts${t.resume_at && t.status === 'waiting' ? ` · ${esc(t.resume_at)}` : ''}</div>
-        <div class="mini-actions">
-          <button class="linklike act-schedule" data-ws="${esc(ws)}">schedule</button>
-          ${active ? `<button class="linklike danger-text act-cancel" data-ws="${esc(ws)}">cancel</button>` : ''}
-        </div>
-      </div>`;
-    })
-    .join('');
-  return `<h3 class="section-title">Other workspaces</h3><div class="grid">${cards}</div>`;
-}
-
-function timeline(task) {
-  if (!task || !(task.journal || []).length) return '';
-  const rows = task.journal
-    .slice(-12)
-    .reverse()
-    .map(
-      (e) => `<li>
-        <span class="tl-icon">${EVENT_ICON[e.event] || '·'}</span>
-        <span class="tl-body">
-          <span class="tl-event">${esc(e.event)}</span>
-          ${e.detail ? `<span class="tl-detail">${esc(e.detail)}</span>` : ''}
-        </span>
-        <span class="tl-ts">${esc((e.ts || '').replace('T', ' ').slice(0, 19))}</span>
-      </li>`
-    )
-    .join('');
-  return `<h3 class="section-title">Activity</h3><section class="card"><ul class="timeline">${rows}</ul></section>`;
-}
+// ------------------------------------------------------------- fragments --
 
 // JSON payload embedded in the page; <-escape so conversation text
 // can never close the script tag.
@@ -365,10 +174,185 @@ function pinnedByWs(state) {
   return out;
 }
 
-function render(state, opts) {
-  const compact = Boolean(opts && opts.compact);
+function shortHM(iso) {
+  const m = /T(\d{2}:\d{2})/.exec(iso || '');
+  return m ? m[1] : '';
+}
+
+function attemptSegs(used, max) {
+  let segs = '';
+  for (let i = 0; i < Math.max(1, max); i++)
+    segs += `<span class="seg ${i < used ? 'on' : ''}"></span>`;
+  return `<div class="attempts"><div class="segs">${segs}</div>
+    <span class="dim">attempt ${used} of ${max}</span></div>`;
+}
+
+function heroCard(ws, task, state) {
+  if (!ws) {
+    return `<section class="card hero-empty">
+      <h2>No folder open</h2>
+      <p class="dim">${
+        (state.projects || []).length
+          ? 'You can still schedule a resume for any project below.'
+          : 'Open a workspace folder to track and resume tasks in it.'
+      }</p>
+    </section>`;
+  }
+  if (!task) {
+    return `<section class="card hero-empty">
+      <h2>Nothing tracked here yet</h2>
+      <p class="dim mono">${esc(ws)}</p>
+      <p class="dim">Hit a usage limit? Schedule a resume below and walk away.</p>
+    </section>`;
+  }
+  const hue = STATUS_HUE[task.status] || 'desc';
+  const label = STATUS_LABEL[task.status] || task.status;
+  const auto = task.resume_mode === 'auto';
+  const active = ['waiting', 'resuming', 'running'].includes(task.status);
+  let timing = '';
+  if (task.status === 'waiting' && task.resume_at) {
+    timing = `<div class="count-row countdown" data-deadline="${esc(task.resume_at)}">
+      <span class="count">—</span>
+      <span class="dim">${auto ? 'until next probe' : 'until resume'} · ${esc(
+        shortHM(task.resume_at)
+      )}</span>
+    </div>`;
+  } else if (task.status === 'resuming') {
+    timing = `<div class="count-row"><span class="resuming-pulse c-blue">● session running</span></div>`;
+  } else if (task.status === 'failed') {
+    timing = `<div class="count-row"><span class="dim">Gave up after ${
+      task.resume_count ?? 0
+    } attempt(s) — reschedule below to retry.</span></div>`;
+  }
+  const wsSessions = (state.sessionsByWs && state.sessionsByWs[ws]) || [];
+  const pinnedInfo = wsSessions.find((s) => s.id === task.session_id);
+  const sessionLine = task.session_id
+    ? `<div class="session-line dim" title="${esc(task.session_id)}">↻ continues “${esc(
+        (pinnedInfo && pinnedInfo.summary) || task.session_id.slice(0, 8)
+      )}” <span class="mono">${esc(task.session_id.slice(0, 8))}</span></div>`
+    : active
+      ? `<div class="session-line c-orange">⚠ no session pinned — resume starts a new chat</div>`
+      : '';
+  return `<section class="card hero">
+    <div class="hd">
+      <span class="dot bg-${hue}"></span>
+      <span class="status-word c-${hue}">${esc(label)}</span>
+      <span class="badge">${esc(task.importance)}</span>
+      ${auto ? '<span class="badge auto">auto-detect</span>' : ''}
+      <span class="spacer"></span>
+      <span class="dim mono ellip" title="${esc(ws)}">${esc(ws)}</span>
+    </div>
+    ${timing}
+    ${attemptSegs(task.resume_count ?? 0, task.max_resumes ?? 3)}
+    ${
+      task.original_prompt
+        ? `<div class="quote dim">“${esc(task.original_prompt.slice(0, 160))}”</div>`
+        : ''
+    }
+    ${sessionLine}
+    <div class="actions">
+      <button class="primary act-schedule" data-ws="${esc(ws)}">${
+        active ? 'Reschedule' : 'Schedule resume'
+      }</button>
+      ${
+        active
+          ? `<button class="outline-danger act-cancel" data-ws="${esc(ws)}">Cancel…</button>`
+          : ''
+      }
+    </div>
+  </section>`;
+}
+
+function composerSection(state, defaultWs) {
+  if (!(state.projects || []).length) return '';
+  const options = state.projects
+    .map(
+      (ws) =>
+        `<option value="${esc(ws)}" ${ws === defaultWs ? 'selected' : ''}>${esc(
+          path.basename(ws)
+        )}${ws === state.currentWs ? ' (current)' : ''} — ${esc(ws)}</option>`
+    )
+    .join('');
+  return `<h3 class="section-title">Schedule</h3>
+  <div class="composer">
+    <div class="c-row">
+      <select class="ws-select" title="Project">${options}</select>
+      <select class="session-select" title="Conversation to continue"></select>
+    </div>
+    <div class="c-row">
+      <button class="chip amber" data-when="auto" title="Probe until the limit lifts, then resume">Auto-detect</button>
+      <button class="chip" data-when="30m">30m</button>
+      <button class="chip" data-when="1h">1h</button>
+      <button class="chip" data-when="2h30m">2h30m</button>
+      <button class="chip" data-when="now">Now</button>
+      <input class="custom-when" placeholder="20:00 · 45m · ISO" />
+      <select class="tier">
+        <option value="">tier: keep</option>
+        <option value="critical">critical</option>
+        <option value="normal">normal</option>
+        <option value="low">low</option>
+      </select>
+      <button class="go">Schedule</button>
+    </div>
+    <div class="c-prompt dim">Prompt: <span class="p-current">continue from where you stopped (default)</span>
+      <a class="p-toggle">customize</a></div>
+    <div class="c-prompt-row" hidden>
+      <input class="prompt-input" placeholder="${esc(DEFAULT_PROMPT)}" />
+    </div>
+  </div>`;
+}
+
+function otherRows(state) {
+  const others = Object.entries(state.tasks || {}).filter(
+    ([ws]) => ws !== state.currentWs
+  );
+  if (!others.length) return '';
+  const rows = others
+    .map(([ws, t]) => {
+      const hue = STATUS_HUE[t.status] || 'desc';
+      const active = ['waiting', 'resuming', 'running'].includes(t.status);
+      const when =
+        t.status === 'waiting' && t.resume_at ? ` · ${shortHM(t.resume_at)}` : '';
+      return `<div class="wsrow">
+        <span class="dot bg-${hue} ${t.status === 'resuming' ? 'pulse' : ''}"></span>
+        <span class="ellip" title="${esc(ws)}">${esc(ws)}</span>
+        <span class="spacer"></span>
+        <span class="dim">${esc((STATUS_LABEL[t.status] || t.status).toLowerCase())}${when}</span>
+        <a class="act-schedule" data-ws="${esc(ws)}">schedule</a>
+        ${active ? `<a class="c-red act-cancel" data-ws="${esc(ws)}">cancel</a>` : ''}
+      </div>`;
+    })
+    .join('');
+  return `<h3 class="section-title">Other workspaces</h3><div class="wsrows">${rows}</div>`;
+}
+
+function timelineSection(task) {
+  if (!task || !(task.journal || []).length) return '';
+  const rows = task.journal
+    .slice(-12)
+    .reverse()
+    .map((e) => {
+      const [glyph, hue] = EVENT_GLYPH[e.event] || ['·', 'desc'];
+      return `<div class="tl-row">
+        <span class="tl-glyph c-${hue}">${glyph}</span>
+        <span class="dim mono tl-ts">${esc(shortHM(e.ts) || '—')}</span>
+        <span class="tl-text">${esc(e.event)}${
+          e.detail ? ` <span class="dim">— ${esc(e.detail)}</span>` : ''
+        }</span>
+      </div>`;
+    })
+    .join('');
+  return `<h3 class="section-title">Activity</h3><div class="timeline">${rows}</div>`;
+}
+
+function render(state) {
   const task = state.currentWs ? state.tasks[state.currentWs] : undefined;
   const hooksOk = state.hooksVia !== null;
+  const healthOk = state.cliFound && hooksOk;
+  const composerWs =
+    state.currentWs && (state.projects || []).includes(state.currentWs)
+      ? state.currentWs
+      : (state.projects || [])[0];
   return `<!DOCTYPE html>
 <html>
 <head>
@@ -380,193 +364,181 @@ function render(state, opts) {
   * { box-sizing: border-box; }
   body {
     font-family: var(--vscode-font-family);
+    font-size: 13px;
     color: var(--vscode-foreground);
     background: var(--vscode-editor-background);
-    margin: 0; padding: 24px;
+    margin: 0;
   }
-  .wrap { max-width: 880px; margin: 0 auto; }
+  .wrap { max-width: 780px; margin: 0 auto; padding: 0 16px 20px; }
+  .mono { font-family: var(--vscode-editor-font-family, ui-monospace, Menlo, monospace); font-size: .92em; }
+  .dim { color: var(--vscode-descriptionForeground); }
+  .spacer { flex: 1; }
+  .ellip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  a { color: var(--vscode-textLink-foreground); text-decoration: none; cursor: pointer; }
+  .c-yellow { color: var(--vscode-charts-yellow, #cca700); }
+  .c-blue   { color: var(--vscode-charts-blue, #3794ff); }
+  .c-green  { color: var(--vscode-charts-green, #89d185); }
+  .c-red    { color: var(--vscode-charts-red, #f48771); }
+  .c-orange { color: var(--vscode-charts-orange, #d18616); }
+  .c-desc   { color: var(--vscode-descriptionForeground); }
+  .bg-yellow { background: var(--vscode-charts-yellow, #cca700); }
+  .bg-blue   { background: var(--vscode-charts-blue, #3794ff); }
+  .bg-green  { background: var(--vscode-charts-green, #89d185); }
+  .bg-red    { background: var(--vscode-charts-red, #f48771); }
+  .bg-orange { background: var(--vscode-charts-orange, #d18616); }
+  .bg-desc   { background: var(--vscode-descriptionForeground); }
+
   header.top {
-    display: flex; align-items: center; gap: 12px; margin-bottom: 20px;
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 16px; margin: 0 -16px 16px;
+    border-bottom: 1px solid var(--vscode-widget-border, rgba(128,128,128,.35));
   }
-  .brand { display: flex; align-items: center; gap: 10px; margin-right: auto; }
-  .brand svg { width: 28px; height: 28px; color: #F59E0B; }
-  .brand h1 { font-size: 16px; font-weight: 600; margin: 0; letter-spacing: .2px; }
-  .chips { display: flex; gap: 8px; flex-wrap: wrap; }
-  .chip {
-    display: inline-flex; align-items: center; gap: 6px;
-    font-size: 11px; padding: 3px 10px; border-radius: 99px;
-    background: var(--vscode-badge-background);
-    color: var(--vscode-badge-foreground);
+  header.top .name { font-weight: 600; font-size: 12px; letter-spacing: .2px; }
+  .health { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--vscode-descriptionForeground); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex: none; }
+  #refresh {
+    background: none; border: none; cursor: pointer; opacity: .6; padding: 2px 4px;
+    color: var(--vscode-foreground); font-size: 14px;
   }
-  .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+  #refresh:hover { opacity: 1; }
+
   .card {
     background: var(--vscode-editorWidget-background);
-    border: 1px solid var(--vscode-widget-border, rgba(128,128,128,.25));
-    border-radius: 10px; padding: 18px 20px; margin-bottom: 14px;
+    border: 1px solid var(--vscode-widget-border, rgba(128,128,128,.35));
+    border-radius: 6px; padding: 18px 20px;
   }
-  .hero-top { display: flex; gap: 16px; justify-content: space-between; align-items: flex-start; }
-  .status-line { display: flex; align-items: center; gap: 8px; }
-  .status-dot { width: 10px; height: 10px; border-radius: 50%; }
-  .status-word { font-size: 18px; font-weight: 650; }
+  .hero .hd { display: flex; align-items: center; gap: 8px; }
+  .dot { width: 8px; height: 8px; }
+  .status-word { font-size: 11px; font-weight: 600; letter-spacing: .6px; text-transform: uppercase; }
   .badge {
-    font-size: 10px; text-transform: uppercase; letter-spacing: .6px;
-    padding: 2px 8px; border-radius: 99px;
-    background: color-mix(in srgb, #F59E0B 18%, transparent);
-    color: #F59E0B; border: 1px solid color-mix(in srgb, #F59E0B 40%, transparent);
+    font-size: 11px; padding: 1px 7px; border-radius: 9px;
+    background: var(--vscode-badge-background); color: var(--vscode-badge-foreground);
   }
-  .badge.alt {
-    background: color-mix(in srgb, var(--vscode-charts-blue) 15%, transparent);
-    color: var(--vscode-charts-blue);
-    border-color: color-mix(in srgb, var(--vscode-charts-blue) 40%, transparent);
+  .badge.auto { background: transparent; border: 1px solid #F59E0B; color: #F59E0B; }
+  .hd .mono { font-size: 11px; max-width: 40%; }
+  .count-row { display: flex; align-items: baseline; gap: 12px; margin-top: 12px; flex-wrap: wrap; }
+  .count { font-size: 40px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -.5px; line-height: 1.1; }
+  .count.due { font-size: 16px; font-weight: 500; }
+  .resuming-pulse { font-size: 16px; animation: pulse 1.6s infinite; }
+  .attempts { display: flex; align-items: center; gap: 10px; margin-top: 10px; font-size: 11px; }
+  .segs { display: flex; gap: 3px; }
+  .seg { width: 22px; height: 4px; border-radius: 2px; background: var(--vscode-widget-border, rgba(128,128,128,.35)); }
+  .seg.on { background: #F59E0B; }
+  .quote {
+    margin-top: 12px; font-size: 12px;
+    border-left: 2px solid var(--vscode-widget-border, rgba(128,128,128,.35));
+    padding-left: 10px;
   }
-  .ws-path { font-size: 11.5px; color: var(--vscode-descriptionForeground); margin-top: 6px; }
-  .prompt { font-size: 12.5px; margin-top: 8px; color: var(--vscode-descriptionForeground); font-style: italic; }
-  .hero-actions { display: flex; flex-direction: column; gap: 8px; min-width: 150px; }
+  .session-line { font-size: 12px; margin-top: 10px; }
+  .actions { display: flex; gap: 8px; margin-top: 16px; }
   button {
-    font-family: inherit; font-size: 12.5px; cursor: pointer;
-    border-radius: 6px; border: 1px solid var(--vscode-button-border, transparent);
-    padding: 7px 14px;
+    font-family: inherit; font-size: 12px; cursor: pointer; border-radius: 3px;
+    border: 1px solid transparent; padding: 5px 14px;
     background: var(--vscode-button-secondaryBackground);
     color: var(--vscode-button-secondaryForeground);
   }
+  button.primary { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; }
+  button.outline-danger {
+    background: transparent; color: var(--vscode-charts-red, #f48771);
+    border: 1px solid var(--vscode-widget-border, rgba(128,128,128,.35));
+  }
   button:hover { filter: brightness(1.12); }
-  button.primary { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
-  button.danger { background: color-mix(in srgb, var(--vscode-charts-red) 20%, transparent); color: var(--vscode-charts-red); border-color: color-mix(in srgb, var(--vscode-charts-red) 45%, transparent); }
-  .countdown { margin: 18px 0 4px; }
-  .count { font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: .5px; }
-  .count.pulse { color: var(--vscode-charts-blue); font-size: 18px; }
-  .count-sub { display: block; font-size: 11.5px; color: var(--vscode-descriptionForeground); margin-top: 2px; }
-  .meter { height: 6px; border-radius: 99px; background: var(--vscode-input-background); overflow: hidden; margin-top: 14px; }
-  .meter-fill { height: 100%; background: #F59E0B; border-radius: 99px; }
-  .meter-label { font-size: 10.5px; color: var(--vscode-descriptionForeground); margin-top: 5px; }
-  .section-title { font-size: 12px; text-transform: uppercase; letter-spacing: .8px; color: var(--vscode-descriptionForeground); margin: 22px 0 10px; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
-  .card.mini { margin: 0; padding: 14px 16px; }
-  .mini-head { display: flex; align-items: center; gap: 8px; }
-  .mini-name { font-weight: 600; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .mini-status { margin-left: auto; font-size: 11.5px; }
-  .mini-sub { font-size: 11px; color: var(--vscode-descriptionForeground); margin-top: 6px; }
-  .mini-actions { margin-top: 8px; display: flex; gap: 12px; }
-  .linklike { background: none; border: none; padding: 0; color: var(--vscode-textLink-foreground); font-size: 11.5px; }
-  .danger-text { color: var(--vscode-charts-red); }
-  .timeline { list-style: none; margin: 0; padding: 0; }
-  .timeline li { display: flex; gap: 10px; align-items: baseline; padding: 7px 0; border-bottom: 1px solid var(--vscode-widget-border, rgba(128,128,128,.15)); }
-  .timeline li:last-child { border-bottom: none; }
-  .tl-icon { width: 20px; text-align: center; }
-  .tl-body { flex: 1; }
-  .tl-event { font-weight: 600; font-size: 12.5px; }
-  .tl-detail { color: var(--vscode-descriptionForeground); font-size: 12px; margin-left: 6px; }
-  .tl-ts { font-size: 10.5px; color: var(--vscode-descriptionForeground); font-variant-numeric: tabular-nums; }
-  .hero.empty { text-align: center; padding: 36px 24px; }
-  .empty-icon { font-size: 34px; margin-bottom: 6px; }
-  .hero.empty h2 { margin: 4px 0 6px; font-size: 16px; }
-  .hero.empty p { margin: 4px 0; font-size: 12.5px; color: var(--vscode-descriptionForeground); }
-  .session-line { font-size: 12px; margin-top: 8px; color: var(--vscode-descriptionForeground); }
-  .session-line.warn { color: var(--vscode-charts-orange); }
-  .session-id { font-family: var(--vscode-editor-font-family, monospace); font-size: 10.5px; opacity: .8; margin-left: 4px; }
-  .plates { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
-  .plates-label { font-size: 11px; text-transform: uppercase; letter-spacing: .6px; color: var(--vscode-descriptionForeground); margin-bottom: 2px; }
-  .plate {
-    display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
-    text-align: left; padding: 8px 12px; border-radius: 8px;
-    background: var(--vscode-input-background);
-    border: 1px solid var(--vscode-widget-border, rgba(128,128,128,.25));
-    color: var(--vscode-foreground);
+  .hero-empty { text-align: left; }
+  .hero-empty h2 { margin: 0 0 6px; font-size: 14px; }
+  .hero-empty p { margin: 4px 0; font-size: 12px; }
+
+  .section-title {
+    font-size: 11px; font-weight: 600; letter-spacing: .6px; text-transform: uppercase;
+    color: var(--vscode-descriptionForeground); margin: 18px 0 8px;
   }
-  .plate:hover { border-color: #F59E0B; filter: none; }
-  .plate.selected {
-    border-color: #F59E0B;
-    background: color-mix(in srgb, #F59E0B 10%, var(--vscode-input-background));
-  }
-  .plate.selected .plate-title::before { content: '● '; color: #F59E0B; }
-  .plate-title { font-size: 12.5px; font-weight: 600; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .plate-meta { font-size: 10.5px; color: var(--vscode-descriptionForeground); font-variant-numeric: tabular-nums; }
-  .composer { margin-top: 16px; text-align: left; }
-  .c-field { margin-bottom: 12px; }
-  .c-field > label {
-    display: block; font-size: 11px; text-transform: uppercase;
-    letter-spacing: .6px; color: var(--vscode-descriptionForeground);
-    margin-bottom: 5px;
-  }
-  .ws-select, .prompt-input {
-    width: 100%; font-family: inherit; font-size: 12px; padding: 6px 10px;
-    border-radius: 6px; border: 1px solid var(--vscode-input-border, transparent);
-    background: var(--vscode-input-background); color: var(--vscode-input-foreground);
-  }
-  .plates-empty { font-size: 11.5px; color: var(--vscode-descriptionForeground); }
-  .presets { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
-  .preset { padding: 5px 12px; border-radius: 99px; font-size: 12px; }
-  .custom-row { display: flex; gap: 8px; }
-  .custom-row input, .custom-row select {
-    font-family: inherit; font-size: 12px; padding: 6px 10px; border-radius: 6px;
+  .composer .c-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 6px; }
+  select, .custom-when, .prompt-input {
+    font-family: inherit; font-size: 12px; padding: 4px 8px; border-radius: 3px;
     border: 1px solid var(--vscode-input-border, transparent);
     background: var(--vscode-input-background); color: var(--vscode-input-foreground);
   }
-  .custom-row input { flex: 1; }
-  footer { display: flex; gap: 16px; margin-top: 26px; font-size: 11.5px; color: var(--vscode-descriptionForeground); align-items: center; flex-wrap: wrap; }
-  footer a { color: var(--vscode-textLink-foreground); text-decoration: none; cursor: pointer; }
-  footer .spacer { margin-left: auto; }
-  ${
-    compact
-      ? `body { padding: 12px; }
-  .wrap { max-width: none; }
-  header.top { flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
-  .chips { width: 100%; order: 3; }
-  .card { padding: 14px; }
-  .hero-top { flex-direction: column; }
-  .hero-actions { flex-direction: row; min-width: 0; }
-  .count { font-size: 24px; }
-  .custom-row { flex-wrap: wrap; }
-  .grid { grid-template-columns: 1fr; }
-  footer .statefile { display: none; }`
-      : ''
+  .ws-select { max-width: 55%; }
+  .session-select { flex: 1; min-width: 160px; }
+  .chip {
+    font-size: 12px; padding: 4px 10px; border-radius: 11px; background: transparent;
+    border: 1px solid var(--vscode-widget-border, rgba(128,128,128,.35));
+    color: var(--vscode-foreground);
+  }
+  .chip.amber { border-color: #F59E0B; color: #F59E0B; }
+  .custom-when { width: 110px; }
+  .go { padding: 4px 12px; }
+  .c-prompt { font-size: 11px; display: flex; gap: 6px; }
+  .c-prompt a { font-size: 11px; }
+  .c-prompt-row { margin-top: 6px; }
+  .prompt-input { width: 100%; }
+
+  .wsrows { display: flex; flex-direction: column; gap: 4px; }
+  .wsrow {
+    display: flex; align-items: center; gap: 8px; padding: 6px 10px; font-size: 12px;
+    border: 1px solid var(--vscode-widget-border, rgba(128,128,128,.35)); border-radius: 4px;
+  }
+  .wsrow .dot { width: 7px; height: 7px; }
+  .wsrow a { font-size: 11px; }
+  .pulse { animation: pulse 1.6s infinite; }
+
+  .timeline { display: flex; flex-direction: column; gap: 7px; font-size: 12px; }
+  .tl-row { display: flex; gap: 8px; align-items: baseline; }
+  .tl-glyph { width: 14px; text-align: center; flex: none; }
+  .tl-ts { width: 40px; flex: none; font-variant-numeric: tabular-nums; }
+  .tl-text { min-width: 0; }
+
+  footer {
+    display: flex; gap: 14px; margin-top: 16px; padding-top: 10px; font-size: 11px;
+    border-top: 1px solid var(--vscode-widget-border, rgba(128,128,128,.35));
+    color: var(--vscode-descriptionForeground); align-items: center;
+  }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+
+  @media (max-width: 480px) {
+    .wrap { padding: 0 12px 16px; }
+    header.top { padding: 8px 12px; margin: 0 -12px 12px; }
+    .card { padding: 12px; }
+    .hd .mono { display: none; }
+    .count { font-size: 28px; }
+    .actions button { flex: 1; }
+    .ws-select, .session-select { max-width: none; width: 100%; flex: none; }
+    footer .statefile { display: none; }
   }
 </style>
 </head>
 <body>
+<header class="top">
+  ${BRAND_SVG}
+  <span class="name">Claude Auto-Resume</span>
+  <span class="spacer"></span>
+  <span class="health" title="CLI ${state.cliFound ? 'found' : 'missing'} · hooks ${
+    hooksOk ? `via ${state.hooksVia}` : 'not set up'
+  } · ${state.daemons} daemon(s) running">
+    <span class="dot bg-${healthOk ? 'green' : 'orange'}"></span>
+    CLI · hooks · ${state.daemons} daemon${state.daemons === 1 ? '' : 's'}
+  </span>
+  <button id="refresh" title="Refresh">⟳</button>
+</header>
 <div class="wrap">
-  <header class="top">
-    <div class="brand">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/><polyline points="23 4 23 10 17 10"/>
-        <circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/>
-      </svg>
-      <h1>Claude Auto-Resume</h1>
-    </div>
-    <div class="chips">
-      ${chip(state.cliFound, 'CLI ready', 'CLI missing')}
-      ${chip(
-        hooksOk,
-        state.hooksVia === 'plugin' ? 'Hooks via plugin' : 'Hooks registered',
-        'Hooks not set up'
-      )}
-      ${chip(state.daemons > 0, `${state.daemons} daemon${state.daemons === 1 ? '' : 's'} active`, 'No daemon running')}
-    </div>
-    <button id="refresh" title="Refresh">⟳</button>
-  </header>
-
   ${
     state.cliFound
       ? ''
-      : `<section class="card hero empty">
-          <div class="empty-icon">⚠️</div>
+      : `<section class="card hero-empty" style="margin-bottom:14px">
           <h2>Terminal tool not installed</h2>
-          <p>The dashboard needs the claude-auto-resume CLI to act.</p>
+          <p class="dim">The dashboard needs the claude-auto-resume CLI to act.</p>
           <p><button class="primary" id="install">Install in terminal</button></p>
         </section>`
   }
-
   ${heroCard(state.currentWs, task, state)}
-  ${otherCards(state)}
-  ${timeline(task)}
-
+  ${composerSection(state, composerWs)}
+  ${otherRows(state)}
+  ${timelineSection(task)}
   <footer>
-    ${compact ? '<a id="openFull">Open full view</a>' : ''}
     <a id="openLog">Log</a>
     <a id="openConfig">Config</a>
     <a href="https://github.com/0xsaju/claude-auto-resume">GitHub</a>
     <span class="spacer"></span>
-    <span class="statefile">state: ~/.claude/auto-resume/state.json · live</span>
+    <span class="statefile mono">~/.claude/auto-resume/state.json · live</span>
   </footer>
 </div>
 <script type="application/json" id="data-sessions">${jsonBlock(state.sessionsByWs || {})}</script>
@@ -577,12 +549,11 @@ function render(state, opts) {
   const $$ = (s, el) => Array.from((el || document).querySelectorAll(s));
 
   $('#refresh').addEventListener('click', () => vscode.postMessage({ type: 'refresh' }));
-  const full = $('#openFull'); if (full) full.addEventListener('click', () => vscode.postMessage({ type: 'openFull' }));
   const inst = $('#install'); if (inst) inst.addEventListener('click', () => vscode.postMessage({ type: 'install' }));
   $('#openLog').addEventListener('click', () => vscode.postMessage({ type: 'openLog' }));
   $('#openConfig').addEventListener('click', () => vscode.postMessage({ type: 'openConfig' }));
 
-  // ---- the composer: project -> session plates -> prompt -> when --------
+  // ---- composer: project -> session -> prompt -> when -------------------
   const SESSIONS = JSON.parse(document.getElementById('data-sessions').textContent);
   const PINNED = JSON.parse(document.getElementById('data-pinned').textContent);
   const composer = $('.composer');
@@ -594,97 +565,90 @@ function render(state, opts) {
     return Math.floor(d / 86400) + 'd ago';
   }
 
-  // Plates are built with DOM APIs (never innerHTML) — summaries are
+  // Options are built with DOM APIs (never innerHTML) — summaries are
   // user-conversation text and must not be interpreted as markup.
-  function makePlate(session, selected) {
-    const b = document.createElement('button');
-    b.className = 'plate' + (selected ? ' selected' : '');
-    b.dataset.session = session ? session.id : 'new';
-    const title = document.createElement('span');
-    title.className = 'plate-title';
-    title.textContent = session ? session.summary || session.id.slice(0, 8) : 'New chat';
-    const meta = document.createElement('span');
-    meta.className = 'plate-meta';
-    meta.textContent = session
-      ? session.id.slice(0, 8) + ' · ' + ago(session.mtime) + ' · ' + session.sizeKb + ' KB'
-      : 'start fresh instead of resuming';
-    b.append(title, meta);
-    b.addEventListener('click', () => {
-      $$('.plate', composer).forEach((x) => x.classList.remove('selected'));
-      b.classList.add('selected');
-    });
-    return b;
-  }
-
-  function renderPlates(ws) {
-    const zone = $('.plates', composer);
-    if (!zone) return;
-    zone.textContent = '';
+  function fillSessions(ws) {
+    const sel = $('.session-select', composer);
+    if (!sel) return;
+    sel.textContent = '';
     const list = SESSIONS[ws] || [];
     const pinned = PINNED[ws];
-    const pinnedListed = list.some((s) => s.id === pinned);
-    list.forEach((s, i) =>
-      zone.append(makePlate(s, pinnedListed ? s.id === pinned : i === 0))
-    );
-    zone.append(makePlate(null, !list.length));
-    if (!list.length) {
-      const note = document.createElement('div');
-      note.className = 'plates-empty';
-      note.textContent = 'No Claude sessions found for this project yet — the resume will start a new chat.';
-      zone.append(note);
-    }
+    list.forEach((s) => {
+      const o = document.createElement('option');
+      o.value = s.id;
+      o.textContent =
+        (s.summary ? s.summary.slice(0, 46) : s.id.slice(0, 8)) +
+        ' · ' + ago(s.mtime) + ' · ' + s.id.slice(0, 8);
+      sel.append(o);
+    });
+    const n = document.createElement('option');
+    n.value = 'new';
+    n.textContent = list.length ? 'New chat (start fresh)' : 'New chat — no sessions here yet';
+    sel.append(n);
+    sel.value = pinned && list.some((s) => s.id === pinned) ? pinned : (list[0] ? list[0].id : 'new');
   }
 
   if (composer) {
     const wsSelect = $('.ws-select', composer);
-    renderPlates(wsSelect.value);
-    wsSelect.addEventListener('change', () => renderPlates(wsSelect.value));
+    fillSessions(wsSelect.value);
+    wsSelect.addEventListener('change', () => fillSessions(wsSelect.value));
+
+    const promptRow = $('.c-prompt-row', composer);
+    const promptInput = $('.prompt-input', composer);
+    const pCurrent = $('.p-current', composer);
+    $('.p-toggle', composer).addEventListener('click', () => {
+      promptRow.hidden = !promptRow.hidden;
+      if (!promptRow.hidden) promptInput.focus();
+    });
+    promptInput.addEventListener('input', () => {
+      pCurrent.textContent = promptInput.value.trim()
+        ? 'custom — “' + promptInput.value.trim().slice(0, 50) + '”'
+        : 'continue from where you stopped (default)';
+    });
+
     const send = (when) => {
-      const plate = $('.plate.selected', composer);
-      const prompt = $('.prompt-input', composer).value.trim();
+      const prompt = promptInput.value.trim();
       vscode.postMessage({
         type: 'schedule',
         ws: wsSelect.value,
         when,
         tier: $('.tier', composer).value,
-        session: plate ? plate.dataset.session : undefined,
+        session: $('.session-select', composer).value || undefined,
         prompt: prompt || undefined,
       });
     };
-    $$('.preset', composer).forEach((p) => p.addEventListener('click', () => send(p.dataset.when)));
+    $$('.chip', composer).forEach((p) => p.addEventListener('click', () => send(p.dataset.when)));
     $('.go', composer).addEventListener('click', () => {
       const v = $('.custom-when', composer).value.trim();
       send(v || 'auto');
     });
   }
 
-  // schedule buttons open the composer targeted at their workspace
+  // schedule buttons target the composer at their workspace
   $$('.act-schedule').forEach((b) =>
     b.addEventListener('click', () => {
       if (!composer) return;
-      const slot = composer.closest('.composer-slot');
-      const fromHero = b.closest('.hero');
-      if (slot) slot.hidden = fromHero ? !slot.hidden : false;
       const wsSelect = $('.ws-select', composer);
       if (b.dataset.ws && [...wsSelect.options].some((o) => o.value === b.dataset.ws)) {
         wsSelect.value = b.dataset.ws;
-        renderPlates(b.dataset.ws);
+        fillSessions(b.dataset.ws);
       }
-      if (!slot || !slot.hidden) composer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      composer.scrollIntoView({ behavior: 'smooth', block: 'center' });
     })
   );
   $$('.act-cancel').forEach((b) =>
     b.addEventListener('click', () => vscode.postMessage({ type: 'cancel', ws: b.dataset.ws }))
   );
 
-  // live countdowns
+  // live countdown
   function tick() {
     $$('.countdown[data-deadline]').forEach((el) => {
       const t = Date.parse(el.dataset.deadline);
       if (isNaN(t)) return;
       let d = Math.floor((t - Date.now()) / 1000);
       const out = $('.count', el);
-      if (d <= 0) { out.textContent = 'due — daemon acts within 60s'; out.style.fontSize = '16px'; return; }
+      if (d <= 0) { out.textContent = 'due — daemon acts within 60s'; out.classList.add('due'); return; }
+      out.classList.remove('due');
       const h = Math.floor(d / 3600); d %= 3600;
       const m = Math.floor(d / 60); const s = d % 60;
       out.textContent = (h ? h + 'h ' : '') + m + 'm ' + String(s).padStart(2, '0') + 's';
