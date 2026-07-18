@@ -1,8 +1,8 @@
 {
   "name": "claude-auto-resume-cockpit",
   "displayName": "Claude Auto-Resume Cockpit",
-  "description": "Status bar and controls for claude-auto-resume: auto-resume Claude Code tasks after usage-limit hits. Pure UI — the terminal tool does all the work.",
-  "version": "0.1.1",
+  "description": "Cockpit for claude-auto-resume: auto-resume Claude Code tasks after usage-limit hits. Sidebar dashboard, status bar, one-click controls — the terminal tool does all the work.",
+  "version": "0.2.0",
   "publisher": "0xsaju",
   "icon": "icon.png",
   "license": "MIT",
@@ -21,6 +21,30 @@
     "onStartupFinished"
   ],
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "claudeAutoResume",
+          "title": "Claude Auto-Resume",
+          "icon": "sidebar-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "claudeAutoResume": [
+        {
+          "id": "claudeAutoResume.tasks",
+          "name": "Tasks",
+          "icon": "sidebar-icon.svg"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "claudeAutoResume.tasks",
+        "contents": "No tracked tasks yet.\nSchedule a resume for the current workspace — typically right after a usage-limit hit:\n[Schedule Resume](command:claudeAutoResume.scheduleResume)\nOr make sure the terminal tool is installed first:\n[Install Terminal Tool](command:claudeAutoResume.installCli)\n[Learn more](https://github.com/0xsaju/claude-auto-resume)"
+      }
+    ],
     "commands": [
       {
         "command": "claudeAutoResume.menu",
@@ -32,21 +56,94 @@
       },
       {
         "command": "claudeAutoResume.scheduleResume",
-        "title": "Claude Auto-Resume: Schedule Resume"
+        "title": "Claude Auto-Resume: Schedule Resume",
+        "icon": "$(calendar)"
       },
       {
         "command": "claudeAutoResume.cancel",
         "title": "Claude Auto-Resume: Cancel Task"
       },
       {
+        "command": "claudeAutoResume.scheduleResumeItem",
+        "title": "Schedule Resume",
+        "icon": "$(calendar)"
+      },
+      {
+        "command": "claudeAutoResume.cancelTaskItem",
+        "title": "Cancel",
+        "icon": "$(circle-slash)"
+      },
+      {
+        "command": "claudeAutoResume.refreshView",
+        "title": "Claude Auto-Resume: Refresh",
+        "icon": "$(refresh)"
+      },
+      {
         "command": "claudeAutoResume.openLog",
-        "title": "Claude Auto-Resume: Open Log"
+        "title": "Claude Auto-Resume: Open Log",
+        "icon": "$(output)"
+      },
+      {
+        "command": "claudeAutoResume.openConfig",
+        "title": "Claude Auto-Resume: Open Configuration",
+        "icon": "$(gear)"
       },
       {
         "command": "claudeAutoResume.installCli",
         "title": "Claude Auto-Resume: Install Terminal Tool"
       }
     ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "claudeAutoResume.scheduleResume",
+          "when": "view == claudeAutoResume.tasks",
+          "group": "navigation@1"
+        },
+        {
+          "command": "claudeAutoResume.refreshView",
+          "when": "view == claudeAutoResume.tasks",
+          "group": "navigation@2"
+        },
+        {
+          "command": "claudeAutoResume.openLog",
+          "when": "view == claudeAutoResume.tasks",
+          "group": "1_manage@1"
+        },
+        {
+          "command": "claudeAutoResume.openConfig",
+          "when": "view == claudeAutoResume.tasks",
+          "group": "1_manage@2"
+        },
+        {
+          "command": "claudeAutoResume.installCli",
+          "when": "view == claudeAutoResume.tasks",
+          "group": "1_manage@3"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "claudeAutoResume.scheduleResumeItem",
+          "when": "view == claudeAutoResume.tasks && viewItem == task",
+          "group": "inline@1"
+        },
+        {
+          "command": "claudeAutoResume.cancelTaskItem",
+          "when": "view == claudeAutoResume.tasks && viewItem == task",
+          "group": "inline@2"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "claudeAutoResume.scheduleResumeItem",
+          "when": "false"
+        },
+        {
+          "command": "claudeAutoResume.cancelTaskItem",
+          "when": "false"
+        }
+      ]
+    },
     "configuration": {
       "title": "Claude Auto-Resume",
       "properties": {

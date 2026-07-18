@@ -13,12 +13,26 @@ const os = require('os');
 const AR_HOME = path.join(os.homedir(), '.claude', 'auto-resume');
 const STATE_FILE = path.join(AR_HOME, 'state.json');
 const LOG_FILE = path.join(AR_HOME, 'logs', 'plugin.log');
+const CONFIG_FILE = path.join(AR_HOME, 'config');
 const INSTALL_CMD =
   'curl -fsSL https://raw.githubusercontent.com/0xsaju/claude-auto-resume/main/install.sh | bash';
 
+const CONFIG_TEMPLATE = `# claude-auto-resume configuration (shell syntax, AR_CFG_* only)
+# Docs: https://github.com/0xsaju/claude-auto-resume/blob/main/docs/USER-GUIDE.md
+#
+# Extra CLI args for headless resumes (e.g. a permission allowlist):
+#AR_CFG_EXTRA_ARGS="--allowedTools Edit,Read,Bash(npm:*)"
+#
+# Claude binary the daemon invokes (default: claude):
+#AR_CFG_CLAUDE_BIN="claude"
+#
+# Model used for auto-mode limit probes (default: haiku):
+#AR_CFG_PROBE_MODEL="haiku"
+`;
+
 let statusItem;
 let output;
-let pollTimer;
+let taskProvider;
 
 // ---------------------------------------------------------------- helpers --
 
@@ -38,12 +52,12 @@ function cliPath() {
   return 'claude-auto-resume';
 }
 
-function runCli(args) {
+function runCli(args, cwd) {
   return new Promise((resolve) => {
     cp.execFile(
       cliPath(),
       args,
-      { cwd: workspacePath() || os.homedir() },
+      { cwd: cwd || workspacePath() || os.homedir() },
       (err, stdout, stderr) => {
         resolve({
           notFound: Boolean(err && err.code === 'ENOENT'),
@@ -55,18 +69,126 @@ function runCli(args) {
   });
 }
 
-function readTask() {
-  const ws = workspacePath();
-  if (!ws) return undefined;
+function readAllTasks() {
   try {
     const state = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
-    return (state.tasks || {})[ws];
+    return state.tasks || {};
   } catch {
-    return undefined;
+    return {};
   }
 }
 
-// ------------------------------------------------------------- status bar --
+function readTask() {
+  const ws = workspacePath();
+  return ws ? readAllTasks()[ws] : undefined;
+}
+
+function statusIcon(status) {
+  return (
+    {
+      waiting: 'clock',
+      resuming: 'sync',
+      running: 'play',
+      'limit-hit': 'warning',
+      done: 'check',
+      failed: 'error',
+      cancelled: 'circle-slash',
+    }[status] || 'question'
+  );
+}
+
+function refreshAll() {
+  refreshStatusBar();
+  if (taskProvider) taskProvider.refresh();
+}
+
+// ---------------------------------------------------------- tasks sidebar --
+
+class TaskProvider {
+  constructor() {
+    this._emitter = new vscode.EventEmitter();
+    this.onDidChangeTreeData = this._emitter.event;
+  }
+
+  refresh() {
+    this._emitter.fire(undefined);
+  }
+
+  getChildren(element) {
+    if (!element) {
+      const tasks = readAllTasks();
+      const current = workspacePath();
+      return Object.keys(tasks)
+        .sort((a, b) =>
+          a === current ? -1 : b === current ? 1 : a.localeCompare(b)
+        )
+        .map((ws) => ({ kind: 'task', ws, task: tasks[ws] }));
+    }
+    if (element.kind === 'task') {
+      const t = element.task;
+      const rows = [
+        { kind: 'info', icon: 'pulse', label: `status: ${t.status}` },
+        { kind: 'info', icon: 'flame', label: `importance: ${t.importance}` },
+        {
+          kind: 'info',
+          icon: 'refresh',
+          label: `resumes used: ${t.resume_count ?? 0} of ${t.max_resumes ?? 3}`,
+        },
+      ];
+      if (t.resume_at) {
+        rows.push({
+          kind: 'info',
+          icon: 'clock',
+          label:
+            t.resume_mode === 'auto'
+              ? `auto-detect · next probe ${t.resume_at}`
+              : `resume at ${t.resume_at}`,
+        });
+      }
+      if (t.original_prompt) {
+        rows.push({
+          kind: 'info',
+          icon: 'note',
+          label: t.original_prompt.slice(0, 100),
+        });
+      }
+      for (const entry of (t.journal || []).slice(-8).reverse()) {
+        rows.push({
+          kind: 'journal',
+          icon: 'history',
+          label: `${entry.event}${entry.detail ? ` — ${entry.detail}` : ''}`,
+          description: entry.ts,
+        });
+      }
+      return rows;
+    }
+    return [];
+  }
+
+  getTreeItem(element) {
+    if (element.kind === 'task') {
+      const item = new vscode.TreeItem(
+        path.basename(element.ws),
+        vscode.TreeItemCollapsibleState.Expanded
+      );
+      item.id = element.ws;
+      item.description = `${element.task.status} · ${element.task.importance}`;
+      item.tooltip = element.ws;
+      item.contextValue = 'task';
+      item.iconPath = new vscode.ThemeIcon(statusIcon(element.task.status));
+      return item;
+    }
+    const item = new vscode.TreeItem(
+      element.label,
+      vscode.TreeItemCollapsibleState.None
+    );
+    if (element.description) item.description = element.description;
+    item.iconPath = new vscode.ThemeIcon(element.icon || 'circle-small');
+    return item;
+  }
+}
+
+// --------------------------------------------------------------- status bar --
 
 function shortTime(iso) {
   const m = /T(\d{2}:\d{2})/.exec(iso || '');
@@ -84,7 +206,10 @@ function refreshStatusBar() {
   const t = shortTime(task.resume_at);
   const auto = task.resume_mode === 'auto';
   const map = {
-    waiting: ['$(clock)', auto ? `waiting · auto${t ? ` (probe ${t})` : ''}` : `waiting · ${t}`],
+    waiting: [
+      '$(clock)',
+      auto ? `waiting · auto${t ? ` (probe ${t})` : ''}` : `waiting · ${t}`,
+    ],
     resuming: ['$(sync~spin)', 'resuming…'],
     running: ['$(play)', 'tracked'],
     'limit-hit': ['$(warning)', 'limit hit'],
@@ -106,17 +231,17 @@ function startWatching(context) {
   // keep a slow poll as a fallback for platforms where fs.watch is flaky.
   try {
     if (fs.existsSync(AR_HOME)) {
-      const watcher = fs.watch(AR_HOME, () => refreshStatusBar());
+      const watcher = fs.watch(AR_HOME, () => refreshAll());
       context.subscriptions.push({ dispose: () => watcher.close() });
     }
   } catch {
     /* fall back to polling only */
   }
-  pollTimer = setInterval(refreshStatusBar, 5000);
-  context.subscriptions.push({ dispose: () => clearInterval(pollTimer) });
+  const timer = setInterval(refreshAll, 5000);
+  context.subscriptions.push({ dispose: () => clearInterval(timer) });
 }
 
-// --------------------------------------------------------------- commands --
+// ---------------------------------------------------------------- commands --
 
 async function showStatus() {
   const res = await runCli(['status']);
@@ -126,7 +251,8 @@ async function showStatus() {
   output.show(true);
 }
 
-async function scheduleResume() {
+async function scheduleResume(item) {
+  const cwd = item && item.ws ? item.ws : undefined;
   const pick = await vscode.window.showQuickPick(
     [
       { label: 'auto', description: 'detect the reset and resume (recommended)' },
@@ -136,7 +262,7 @@ async function scheduleResume() {
       { label: 'now', description: 'immediately' },
       { label: 'custom…', description: '20:00, 45m, ISO-8601 …' },
     ],
-    { placeHolder: 'When should this workspace resume?' }
+    { placeHolder: `Resume ${cwd || workspacePath() || 'this workspace'} when?` }
   );
   if (!pick) return;
   let when = pick.label;
@@ -146,19 +272,20 @@ async function scheduleResume() {
     });
     if (!when) return;
   }
-  const res = await runCli(['resume-at', when]);
+  const res = await runCli(['resume-at', when], cwd);
   if (res.notFound) return offerInstall();
   vscode.window.showInformationMessage(
     res.code === 0 ? res.text.split('\n')[0] : `Scheduling failed: ${res.text}`
   );
-  refreshStatusBar();
+  refreshAll();
 }
 
-async function cancelTask() {
-  const res = await runCli(['cancel']);
+async function cancelTask(item) {
+  const cwd = item && item.ws ? item.ws : undefined;
+  const res = await runCli(['cancel'], cwd);
   if (res.notFound) return offerInstall();
   vscode.window.showInformationMessage(res.text.split('\n')[0]);
-  refreshStatusBar();
+  refreshAll();
 }
 
 async function openLog() {
@@ -168,6 +295,15 @@ async function openLog() {
   }
   const doc = await vscode.workspace.openTextDocument(LOG_FILE);
   await vscode.window.showTextDocument(doc, { preview: true });
+}
+
+async function openConfig() {
+  if (!fs.existsSync(CONFIG_FILE)) {
+    fs.mkdirSync(path.dirname(CONFIG_FILE), { recursive: true });
+    fs.writeFileSync(CONFIG_FILE, CONFIG_TEMPLATE);
+  }
+  const doc = await vscode.workspace.openTextDocument(CONFIG_FILE);
+  await vscode.window.showTextDocument(doc, { preview: false });
 }
 
 function installCli() {
@@ -194,6 +330,7 @@ async function showMenu() {
       ? [{ label: '$(circle-slash) Cancel task', act: cancelTask }]
       : []),
     { label: '$(output) Open log', act: openLog },
+    { label: '$(gear) Open config', act: openConfig },
     { label: '$(cloud-download) Install/reinstall terminal tool', act: installCli },
   ];
   const pick = await vscode.window.showQuickPick(items, {
@@ -214,16 +351,27 @@ async function activate(context) {
   statusItem.show();
   context.subscriptions.push(output, statusItem);
 
+  taskProvider = new TaskProvider();
+  context.subscriptions.push(
+    vscode.window.createTreeView('claudeAutoResume.tasks', {
+      treeDataProvider: taskProvider,
+    })
+  );
+
   context.subscriptions.push(
     vscode.commands.registerCommand('claudeAutoResume.menu', showMenu),
     vscode.commands.registerCommand('claudeAutoResume.status', showStatus),
     vscode.commands.registerCommand('claudeAutoResume.scheduleResume', scheduleResume),
     vscode.commands.registerCommand('claudeAutoResume.cancel', cancelTask),
+    vscode.commands.registerCommand('claudeAutoResume.scheduleResumeItem', scheduleResume),
+    vscode.commands.registerCommand('claudeAutoResume.cancelTaskItem', cancelTask),
+    vscode.commands.registerCommand('claudeAutoResume.refreshView', refreshAll),
     vscode.commands.registerCommand('claudeAutoResume.openLog', openLog),
+    vscode.commands.registerCommand('claudeAutoResume.openConfig', openConfig),
     vscode.commands.registerCommand('claudeAutoResume.installCli', installCli)
   );
 
-  refreshStatusBar();
+  refreshAll();
   startWatching(context);
 
   // Onboarding: offer the one-command install when the CLI is missing.
