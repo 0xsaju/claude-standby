@@ -2,7 +2,7 @@
   "name": "claude-auto-resume-cockpit",
   "displayName": "Claude Auto-Resume Cockpit",
   "description": "Cockpit for claude-auto-resume: auto-resume Claude Code tasks after usage-limit hits. Sidebar dashboard, status bar, one-click controls — the terminal tool does all the work.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "publisher": "0xsaju",
   "icon": "icon.png",
   "license": "MIT",
@@ -42,10 +42,15 @@
     "viewsWelcome": [
       {
         "view": "claudeAutoResume.tasks",
-        "contents": "No tracked tasks yet.\nSchedule a resume for the current workspace — typically right after a usage-limit hit:\n[Schedule Resume](command:claudeAutoResume.scheduleResume)\nOr make sure the terminal tool is installed first:\n[Install Terminal Tool](command:claudeAutoResume.installCli)\n[Learn more](https://github.com/0xsaju/claude-auto-resume)"
+        "contents": "No tracked tasks yet.\n[Open Dashboard](command:claudeAutoResume.openDashboard)\nSchedule a resume for the current workspace — typically right after a usage-limit hit:\n[Schedule Resume](command:claudeAutoResume.scheduleResume)\n[Learn more](https://github.com/0xsaju/claude-auto-resume)"
       }
     ],
     "commands": [
+      {
+        "command": "claudeAutoResume.openDashboard",
+        "title": "Claude Auto-Resume: Open Dashboard",
+        "icon": "$(dashboard)"
+      },
       {
         "command": "claudeAutoResume.menu",
         "title": "Claude Auto-Resume: Menu"
@@ -95,6 +100,11 @@
     ],
     "menus": {
       "view/title": [
+        {
+          "command": "claudeAutoResume.openDashboard",
+          "when": "view == claudeAutoResume.tasks",
+          "group": "navigation@0"
+        },
         {
           "command": "claudeAutoResume.scheduleResume",
           "when": "view == claudeAutoResume.tasks",

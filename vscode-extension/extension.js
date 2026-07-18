@@ -9,6 +9,7 @@ const cp = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const dashboard = require('./dashboard');
 
 const AR_HOME = path.join(os.homedir(), '.claude', 'auto-resume');
 const STATE_FILE = path.join(AR_HOME, 'state.json');
@@ -100,7 +101,101 @@ function statusIcon(status) {
 function refreshAll() {
   refreshStatusBar();
   if (taskProvider) taskProvider.refresh();
+  dashboard.update(host);
 }
+
+// -------------------------------------------------------- dashboard state --
+
+let cliFoundCache = { at: 0, value: true };
+
+function collectState() {
+  const cli = cliPath();
+  if (Date.now() - cliFoundCache.at > 60000) {
+    cliFoundCache = {
+      at: Date.now(),
+      value: path.isAbsolute(cli) ? fs.existsSync(cli) : true,
+    };
+  }
+  let hooksVia = null;
+  try {
+    const settings = path.join(os.homedir(), '.claude', 'settings.json');
+    if (
+      fs.existsSync(settings) &&
+      fs.readFileSync(settings, 'utf8').includes('on-stop.sh')
+    ) {
+      hooksVia = 'settings';
+    } else {
+      const plugins = path.join(os.homedir(), '.claude', 'plugins');
+      if (
+        fs.existsSync(plugins) &&
+        JSON.stringify(fs.readdirSync(plugins)).includes('claude-auto-resume')
+      ) {
+        hooksVia = 'plugin';
+      } else if (fs.existsSync(plugins)) {
+        for (const sub of fs.readdirSync(plugins)) {
+          try {
+            const p = path.join(plugins, sub);
+            if (
+              fs.statSync(p).isDirectory() &&
+              JSON.stringify(fs.readdirSync(p)).includes('claude-auto-resume')
+            ) {
+              hooksVia = 'plugin';
+              break;
+            }
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  let daemons = 0;
+  try {
+    const dir = path.join(AR_HOME, 'daemons');
+    for (const f of fs.existsSync(dir) ? fs.readdirSync(dir) : []) {
+      if (!f.endsWith('.pid')) continue;
+      const pid = parseInt(fs.readFileSync(path.join(dir, f), 'utf8'), 10);
+      try {
+        process.kill(pid, 0);
+        daemons++;
+      } catch {
+        /* stale */
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return {
+    tasks: readAllTasks(),
+    currentWs: workspacePath(),
+    cliFound: cliFoundCache.value,
+    hooksVia,
+    daemons,
+  };
+}
+
+const host = {
+  collectState,
+  schedule: async (ws, when, tier) => {
+    const args = ['resume-at', when || 'auto'];
+    if (tier) args.push(tier);
+    const res = await runCli(args, ws);
+    if (res.notFound) return offerInstall();
+    if (res.code !== 0)
+      vscode.window.showWarningMessage(`Scheduling failed: ${res.text}`);
+    refreshAll();
+  },
+  cancel: async (ws) => {
+    const res = await runCli(['cancel'], ws);
+    if (res.notFound) return offerInstall();
+    refreshAll();
+  },
+  openLog: () => openLog(),
+  openConfig: () => openConfig(),
+  installCli: () => installCli(),
+};
 
 // ---------------------------------------------------------- tasks sidebar --
 
@@ -124,66 +219,23 @@ class TaskProvider {
         )
         .map((ws) => ({ kind: 'task', ws, task: tasks[ws] }));
     }
-    if (element.kind === 'task') {
-      const t = element.task;
-      const rows = [
-        { kind: 'info', icon: 'pulse', label: `status: ${t.status}` },
-        { kind: 'info', icon: 'flame', label: `importance: ${t.importance}` },
-        {
-          kind: 'info',
-          icon: 'refresh',
-          label: `resumes used: ${t.resume_count ?? 0} of ${t.max_resumes ?? 3}`,
-        },
-      ];
-      if (t.resume_at) {
-        rows.push({
-          kind: 'info',
-          icon: 'clock',
-          label:
-            t.resume_mode === 'auto'
-              ? `auto-detect · next probe ${t.resume_at}`
-              : `resume at ${t.resume_at}`,
-        });
-      }
-      if (t.original_prompt) {
-        rows.push({
-          kind: 'info',
-          icon: 'note',
-          label: t.original_prompt.slice(0, 100),
-        });
-      }
-      for (const entry of (t.journal || []).slice(-8).reverse()) {
-        rows.push({
-          kind: 'journal',
-          icon: 'history',
-          label: `${entry.event}${entry.detail ? ` — ${entry.detail}` : ''}`,
-          description: entry.ts,
-        });
-      }
-      return rows;
-    }
     return [];
   }
 
   getTreeItem(element) {
-    if (element.kind === 'task') {
-      const item = new vscode.TreeItem(
-        path.basename(element.ws),
-        vscode.TreeItemCollapsibleState.Expanded
-      );
-      item.id = element.ws;
-      item.description = `${element.task.status} · ${element.task.importance}`;
-      item.tooltip = element.ws;
-      item.contextValue = 'task';
-      item.iconPath = new vscode.ThemeIcon(statusIcon(element.task.status));
-      return item;
-    }
     const item = new vscode.TreeItem(
-      element.label,
+      path.basename(element.ws),
       vscode.TreeItemCollapsibleState.None
     );
-    if (element.description) item.description = element.description;
-    item.iconPath = new vscode.ThemeIcon(element.icon || 'circle-small');
+    item.id = element.ws;
+    item.description = `${element.task.status} · ${element.task.importance}`;
+    item.tooltip = `${element.ws}\nClick to open the dashboard.`;
+    item.contextValue = 'task';
+    item.iconPath = new vscode.ThemeIcon(statusIcon(element.task.status));
+    item.command = {
+      command: 'claudeAutoResume.openDashboard',
+      title: 'Open Dashboard',
+    };
     return item;
   }
 }
@@ -347,7 +399,7 @@ async function activate(context) {
     vscode.StatusBarAlignment.Left,
     50
   );
-  statusItem.command = 'claudeAutoResume.menu';
+  statusItem.command = 'claudeAutoResume.openDashboard';
   statusItem.show();
   context.subscriptions.push(output, statusItem);
 
@@ -359,6 +411,9 @@ async function activate(context) {
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand('claudeAutoResume.openDashboard', () =>
+      dashboard.createOrShow(context, host)
+    ),
     vscode.commands.registerCommand('claudeAutoResume.menu', showMenu),
     vscode.commands.registerCommand('claudeAutoResume.status', showStatus),
     vscode.commands.registerCommand('claudeAutoResume.scheduleResume', scheduleResume),
