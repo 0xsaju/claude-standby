@@ -535,9 +535,12 @@ JSON
   [ ! -f "$CTMP/settings3.json" ] && ok "hooks: conflict skips registration" \
     || fail "hooks: conflict skips registration" "$(cat "$CTMP/settings3.json")"
 
-  # doctor reports hook status
+  # doctor reports hook status (settings route, plugin route)
   t_contains "hooks: doctor shows registered" "registered in settings.json" \
     "$(CLAUDE_AUTO_RESUME_CLAUDE_BIN="$HERE/fake-claude.sh" bash "$CLI" doctor)"
+  t_contains "hooks: doctor shows plugin-provided" "provided by the Claude Code plugin" \
+    "$(CLAUDE_SETTINGS_FILE="$CTMP/settings3.json" CLAUDE_AUTO_RESUME_PLUGIN_SCAN="$CTMP/fake-plugins" \
+       CLAUDE_AUTO_RESUME_CLAUDE_BIN="$HERE/fake-claude.sh" bash "$CLI" doctor)"
 else
   printf 'skip - hook setup tests need python3\n'
 fi

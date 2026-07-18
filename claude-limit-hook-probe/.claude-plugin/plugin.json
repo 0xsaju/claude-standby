@@ -1,5 +1,0 @@
-{
-  "name": "limit-hook-probe",
-  "version": "0.1.0",
-  "description": "Instrumented probe: logs every lifecycle hook payload + transcript tail to verify which hooks fire on a rate-limit hit, and what they contain."
-}

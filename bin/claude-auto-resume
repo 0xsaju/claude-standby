@@ -136,8 +136,11 @@ EOF
     done
     printf '  %-8s %-5s %s\n' "daemons" "ok" "$RUNNING running, $STALE stale"
     SETTINGS="${CLAUDE_SETTINGS_FILE:-$HOME/.claude/settings.json}"
+    PLUGIN_SCAN="${CLAUDE_AUTO_RESUME_PLUGIN_SCAN:-$HOME/.claude/plugins}"
     if [ -f "$SETTINGS" ] && grep -q "on-stop.sh" "$SETTINGS" 2>/dev/null; then
       printf '  %-8s %-5s %s\n' "hooks" "ok" "registered in settings.json"
+    elif [ -d "$PLUGIN_SCAN" ] && find "$PLUGIN_SCAN" -maxdepth 4 -name "*claude-auto-resume*" 2>/dev/null | grep -q .; then
+      printf '  %-8s %-5s %s\n' "hooks" "ok" "provided by the Claude Code plugin"
     else
       printf '  %-8s %-5s %s\n' "hooks" "--" "not registered (claude-auto-resume setup-hooks); manual mode still works"
     fi
