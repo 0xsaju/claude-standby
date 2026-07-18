@@ -223,6 +223,115 @@ t_contains "fake: stream-json emits typed lines" '"type":"result"' "$OUT"
 
 rm -rf "$FTMP"
 
+# -------------------------------------------------- task-resume-at parsing --
+
+PTMP="$(mktemp -d "${TMPDIR:-/tmp}/ar-test-XXXXXX")"
+export CLAUDE_AUTO_RESUME_STATE="$PTMP/state.json"
+export CLAUDE_AUTO_RESUME_LOG_DIR="$PTMP/logs"
+unset AR_JSON_ENGINE
+export AR_NOTIFY_SILENT=1
+
+NOW="$(date +%s)"
+E="$(AR_PARSE_ONLY=1 bash "$PLUGIN/scripts/task-resume-at.sh" now)"
+D=$((E - NOW)); [ "$D" -ge 0 ] && [ "$D" -le 3 ] && ok "parse: now" || fail "parse: now" "delta: $D"
+E="$(AR_PARSE_ONLY=1 bash "$PLUGIN/scripts/task-resume-at.sh" 2h30m)"
+D=$((E - NOW - 9000)); [ "$D" -ge -3 ] && [ "$D" -le 3 ] && ok "parse: 2h30m" || fail "parse: 2h30m" "delta: $D"
+E="$(AR_PARSE_ONLY=1 bash "$PLUGIN/scripts/task-resume-at.sh" 45m)"
+D=$((E - NOW - 2700)); [ "$D" -ge -3 ] && [ "$D" -le 3 ] && ok "parse: 45m" || fail "parse: 45m" "delta: $D"
+t_eq "parse: ISO passthrough" "1767225600" "$(AR_PARSE_ONLY=1 bash "$PLUGIN/scripts/task-resume-at.sh" '2026-01-01T00:00:00+0000')"
+E="$(AR_PARSE_ONLY=1 bash "$PLUGIN/scripts/task-resume-at.sh" 23:59)"
+if [ "$E" -gt "$NOW" ] && [ "$E" -le $((NOW + 86400 + 60)) ]; then
+  ok "parse: HH:MM is next occurrence"
+else
+  fail "parse: HH:MM is next occurrence" "now: $NOW got: $E"
+fi
+t_contains "parse: garbage rejected" "Could not parse" "$(bash "$PLUGIN/scripts/task-resume-at.sh" 'not-a-time!!')"
+rm -rf "$PTMP"
+
+# ------------------------------------------------- scheduling + daemon --
+
+DTMP="$(mktemp -d "${TMPDIR:-/tmp}/ar-test-XXXXXX")"
+DTMP="$(cd "$DTMP" && pwd)"   # normalize: workspace keys come from pwd
+export CLAUDE_AUTO_RESUME_STATE="$DTMP/state.json"
+export CLAUDE_AUTO_RESUME_LOG_DIR="$DTMP/logs"
+export CLAUDE_AUTO_RESUME_CLAUDE_BIN="$HERE/fake-claude.sh"
+export FAKE_CLAUDE_TRANSCRIPT_DIR="$DTMP/transcripts"
+export FAKE_CLAUDE_RUN_SECS=0
+export FAKE_CLAUDE_MODE=clean
+export AR_DAEMON_TICK_SECS=1
+export AR_NORMAL_GRACE_SECS=0
+export AR_BACKOFF_BASE_SECS=0
+export AR_NOTIFY_SILENT=1
+unset AR_JSON_ENGINE
+. "$PLUGIN/scripts/lib.sh"
+
+# schedule writes state (no daemon)
+WS1="$DTMP/ws-critical"; mkdir -p "$WS1"
+OUT="$(cd "$WS1" && AR_NO_DAEMON=1 bash "$PLUGIN/scripts/task-resume-at.sh" now)"
+t_contains "schedule: confirms" "Resume scheduled." "$OUT"
+t_eq "schedule: status waiting" "waiting" "$(ar_task_get "$WS1" status)"
+t_eq "schedule: untracked defaults to critical" "critical" "$(ar_task_get "$WS1" importance)"
+[ -n "$(ar_task_get "$WS1" resume_at)" ] && ok "schedule: resume_at set" || fail "schedule: resume_at set"
+t_contains "schedule: journaled" "scheduled" "$(ar_journal_show "$WS1" 5)"
+
+# daemon: critical + clean resume -> done
+bash "$PLUGIN/scripts/daemon.sh" "$WS1"
+t_eq "daemon: critical clean run ends done" "done" "$(ar_task_get "$WS1" status)"
+t_eq "daemon: resume_count incremented" "1" "$(ar_task_get "$WS1" resume_count)"
+t_contains "daemon: journal has resumed" "resumed" "$(ar_journal_show "$WS1" 10)"
+t_contains "daemon: journal has done" "done" "$(ar_journal_show "$WS1" 10)"
+t_contains "daemon: captured output tail" "Task completed cleanly." "$(ar_task_get "$WS1" last_output_tail)"
+
+# daemon: normal importance with zero grace also resumes
+WS2="$DTMP/ws-normal"; mkdir -p "$WS2"
+(cd "$WS2" && AR_NO_DAEMON=1 bash "$PLUGIN/scripts/task-resume-at.sh" now normal >/dev/null)
+bash "$PLUGIN/scripts/daemon.sh" "$WS2"
+t_eq "daemon: normal tier resumes after grace" "done" "$(ar_task_get "$WS2" status)"
+
+# daemon: low importance -> notify only, no claude invocation
+WS3="$DTMP/ws-low"; mkdir -p "$WS3"
+BEFORE="$(ls "$DTMP/transcripts" 2>/dev/null | wc -l | tr -d ' ')"
+(cd "$WS3" && AR_NO_DAEMON=1 bash "$PLUGIN/scripts/task-resume-at.sh" now low >/dev/null)
+bash "$PLUGIN/scripts/daemon.sh" "$WS3"
+AFTER="$(ls "$DTMP/transcripts" 2>/dev/null | wc -l | tr -d ' ')"
+t_eq "daemon: low tier never auto-resumes" "limit-hit" "$(ar_task_get "$WS3" status)"
+t_eq "daemon: low tier spawned no session" "$BEFORE" "$AFTER"
+t_contains "daemon: low tier journaled reset" "reset-reached" "$(ar_journal_show "$WS3" 5)"
+
+# daemon: stands down on cancelled
+WS4="$DTMP/ws-cancelled"; mkdir -p "$WS4"
+(cd "$WS4" && AR_NO_DAEMON=1 bash "$PLUGIN/scripts/task-resume-at.sh" now >/dev/null)
+ar_task_set "$WS4" status cancelled
+bash "$PLUGIN/scripts/daemon.sh" "$WS4"
+t_eq "daemon: cancelled task untouched" "cancelled" "$(ar_task_get "$WS4" status)"
+
+# daemon: repeated limit hits -> backoff then failed at max_resumes
+WS5="$DTMP/ws-limited"; mkdir -p "$WS5"
+(cd "$WS5" && AR_NO_DAEMON=1 bash "$PLUGIN/scripts/task-resume-at.sh" now >/dev/null)
+ar_task_set "$WS5" max_resumes 2
+FAKE_CLAUDE_MODE=limit bash "$PLUGIN/scripts/daemon.sh" "$WS5"
+t_eq "daemon: limited resume ends failed" "failed" "$(ar_task_get "$WS5" status)"
+t_eq "daemon: attempts bounded by max_resumes" "2" "$(ar_task_get "$WS5" resume_count)"
+t_contains "daemon: backoff journaled" "resume-failed" "$(ar_journal_show "$WS5" 10)"
+
+# daemon: pre-exhausted max_resumes -> failed without attempting
+WS6="$DTMP/ws-exhausted"; mkdir -p "$WS6"
+(cd "$WS6" && AR_NO_DAEMON=1 bash "$PLUGIN/scripts/task-resume-at.sh" now >/dev/null)
+ar_task_upsert "$WS6" "resume_count=3" "max_resumes=3"
+bash "$PLUGIN/scripts/daemon.sh" "$WS6"
+t_eq "daemon: exhausted cap fails fast" "failed" "$(ar_task_get "$WS6" status)"
+t_contains "daemon: cap journaled" "max_resumes" "$(ar_journal_show "$WS6" 5)"
+
+# daemon: pidfiles cleaned up
+if ls "$DTMP"/daemons/*.pid >/dev/null 2>&1; then
+  fail "daemon: pidfiles cleaned up" "$(ls "$DTMP"/daemons/)"
+else
+  ok "daemon: pidfiles cleaned up"
+fi
+
+unset CLAUDE_AUTO_RESUME_CLAUDE_BIN FAKE_CLAUDE_TRANSCRIPT_DIR FAKE_CLAUDE_MODE
+rm -rf "$DTMP"
+
 # ---------------------------------------------------------- on-stop smoke --
 
 STMP="$(mktemp -d "${TMPDIR:-/tmp}/ar-test-XXXXXX")"

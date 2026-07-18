@@ -1,0 +1,13 @@
+{
+  "name": "auto-resume",
+  "owner": {
+    "name": "0xsaju"
+  },
+  "plugins": [
+    {
+      "name": "claude-auto-resume",
+      "source": "./plugin",
+      "description": "Auto-resume Claude Code tasks after usage-limit hits: schedule a resume for the reset time, graded by task importance, with safety rails."
+    }
+  ]
+}

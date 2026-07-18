@@ -29,10 +29,15 @@ contract = `~/.claude/auto-resume/state.json`.
 ## File map
 
 - `plugin/scripts/lib.sh` — state.json helpers, logging, notify, timestamps
+- `plugin/scripts/daemon.sh` — detached wait-and-resume daemon (tiers,
+  backoff, max_resumes, pidfile per workspace)
 - `plugin/scripts/on-stop.sh` — Stop/SessionEnd hook entry (detection stub)
 - `plugin/scripts/task-*.sh` — backends for the /task-* slash commands
+  (task-resume-at.sh = manual post-limit scheduling, D10)
 - `plugin/hooks/hooks.json`, `plugin/commands/*.md` — plugin wiring
+- `.claude-plugin/marketplace.json` — local/GitHub install manifest
 - `test/fake-claude.sh` — claude CLI stub; `test/run-tests.sh` — test suite
+- `docs/USER-GUIDE.md` — user manual (keep in sync with behavior changes)
 - `docs/ARCHITECTURE.md` — full design; `docs/DECISIONS.md` — append-only
   decision log; `docs/HOOK-FINDINGS.md` — probe results (source of truth
   for detection)

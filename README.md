@@ -1,82 +1,146 @@
 # claude-auto-resume
 
-Make long Claude Code tasks survive rate-limit hits. When a tracked session
-stops on a usage limit, this tool detects it, waits until the limit resets,
-and automatically resumes the same session with proper context — no
-babysitting the terminal.
+**Automatic recovery for Claude Code sessions that hit usage limits.**
 
-> **Status: early development (Phase 0 complete).** The scaffold, state
-> library, slash commands, and test harness exist and are fully tested.
-> Limit **detection is intentionally stubbed** until real hook-payload data
-> is collected (see [How detection gets built](#how-detection-gets-built)).
-> Not yet installable for real use.
+When a long-running Claude Code task stops on a rate limit, claude-auto-resume
+waits for the limit to reset and resumes the same session — automatically,
+with context, and without you babysitting a terminal.
+
+![License](https://img.shields.io/badge/license-MIT-blue)
+![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey)
+![Status](https://img.shields.io/badge/status-alpha-orange)
+![Tests](https://img.shields.io/badge/tests-119%20passing-brightgreen)
+
+---
+
+## Table of contents
+
+- [Why](#why)
+- [Key features](#key-features)
+- [How it works](#how-it-works)
+- [Quick start](#quick-start)
+- [Command reference](#command-reference)
+- [Documentation](#documentation)
+- [Project status](#project-status)
+- [Development](#development)
+- [Limitations](#limitations)
+- [License](#license)
+
+## Why
+
+Long agentic tasks regularly outlive a usage window. When the limit hits,
+the session dies mid-task and you wait — checking back every so often so you
+can type "continue" the moment the limit resets. This tool removes that
+loop: schedule once, walk away, come back to a finished task.
+
+## Key features
+
+| Feature | Description |
+|---|---|
+| **Post-limit scheduling** | Already hit the limit? `/task-resume-at 20:00` schedules the resume — no pre-registration needed. |
+| **Importance tiers** | `critical` resumes with no questions asked, `normal` gives you a 60-second window to object, `low` just notifies you. |
+| **Suspend-safe waiting** | The daemon wakes every 60 s and compares wall-clock time, so a closed laptop lid doesn't break the schedule. |
+| **Context-aware resume** | Resume prompts point the session at your `PROGRESS.md` so it picks up where it left off. |
+| **Safety rails** | Bounded retries (`max_resumes`), exponential-style backoff when a resume bounces off a still-active limit, cancel at any time, no dangerous permission flags unless you opt in. |
+| **Editor-agnostic** | It's a Claude Code plugin: works from a terminal, SSH, JetBrains, or VS Code. A dedicated VS Code UI is planned. |
 
 ## How it works
 
-1. You start a tracked task: `/task-start <critical|normal|low> <prompt>`.
-2. The session runs. If a usage limit stops it, a `Stop`/`SessionEnd` hook
-   inspects the transcript.
-3. On a limit hit, the hook records the reset time, notifies you, and
-   spawns a small detached daemon.
-4. The daemon wakes every 60 seconds until the reset time (suspend-safe —
-   never one long `sleep`), then resumes headlessly:
-   `claude --resume <session_id> -p "<resume prompt>"`.
-5. The loop closes when the task finishes — bounded by `max_resumes` and
-   stuck detection.
+```mermaid
+stateDiagram-v2
+    [*] --> waiting : /task-resume-at <time>
+    waiting --> resuming : reset time reached\n(per importance tier)
+    resuming --> done : session finishes cleanly
+    resuming --> waiting : still limited → back off, retry\n(bounded by max_resumes)
+    resuming --> failed : max_resumes exhausted
+    waiting --> cancelled : /task-cancel
+    waiting --> [*]
+    done --> [*]
+    failed --> [*]
+```
 
-Behavior is graded by importance:
+1. **You schedule** a resume for the current workspace — typically right
+   after seeing the limit message: `/task-resume-at 2h30m`.
+2. **A detached daemon** starts and sleeps in 60-second ticks until the
+   reset time. It re-reads state every tick, so cancelling or rescheduling
+   takes effect within a minute.
+3. **At reset time** it acts per the importance tier, then resumes the
+   session headlessly: `claude --resume <session_id> -p "<resume prompt>"`.
+4. **If the resume bounces** (limit not actually reset yet), it backs off
+   and retries — at most `max_resumes` times — then reports honestly.
 
-| Importance | Behavior at reset |
+Everything the daemon knows lives in one file,
+`~/.claude/auto-resume/state.json`, which is also the contract any UI
+(status bar, future VS Code extension) reads. Actions and outcomes are
+journaled per task; `/task-status` shows the timeline.
+
+## Quick start
+
+Requires Claude Code with plugin support, bash, and macOS or Linux
+(`jq` recommended but not required).
+
+```text
+# inside Claude Code, from this repository's clone or GitHub:
+/plugin marketplace add 0xsaju/claude-auto-resume
+/plugin install claude-auto-resume@auto-resume
+```
+
+Then, the day a limit hits you mid-task:
+
+```text
+/task-resume-at 20:00        # resume when your window resets at 20:00
+/task-status                 # watch it
+/task-cancel                 # changed your mind
+```
+
+Or track a task up front so it carries an importance tier:
+
+```text
+/task-start critical Migrate the billing service to the new API
+```
+
+Full walkthroughs, configuration, and troubleshooting: see the
+**[User Guide](docs/USER-GUIDE.md)**.
+
+## Command reference
+
+| Command | What it does |
 |---|---|
-| `critical` | Resume automatically, no confirmation |
-| `normal`   | Notify, then auto-proceed after a 60 s window |
-| `low`      | Notify only; you resume manually |
+| `/task-resume-at <when> [tier]` | Schedule an auto-resume for this workspace. `<when>` accepts `20:00`, `2h30m`, `45m`, full ISO-8601, or `now`. |
+| `/task-start <tier> <prompt>` | Track this workspace as a resumable task (`critical` \| `normal` \| `low`). |
+| `/task-status` | Show status, resume schedule, attempt count, and recent journal. |
+| `/task-cancel` | Cancel tracking; any pending auto-resume stands down within one tick. |
 
-Tracked tasks keep a `PROGRESS.md` in the workspace; resume prompts point
-the session at it first, with a fallback that re-sends the task summary if
-the resumed session seems lost.
+## Documentation
 
-## Components
+| Document | Audience |
+|---|---|
+| [User Guide](docs/USER-GUIDE.md) | Installing, using, configuring, troubleshooting |
+| [Architecture](docs/ARCHITECTURE.md) | Design: components, state contract, lifecycle |
+| [Decisions](docs/DECISIONS.md) | Append-only engineering decision log |
+| [Hook Findings](docs/HOOK-FINDINGS.md) | Measured hook behavior at limit hits (drives detection) |
 
-- **Engine** — a Claude Code plugin (`plugin/`). Editor-agnostic: works
-  from a plain terminal, SSH, JetBrains, or VS Code.
-- **Cockpit** — a future VS Code extension (`vscode-extension/`, empty
-  for now). A pure UI over the state file; it never spawns Claude itself.
-- **Contract** — `~/.claude/auto-resume/state.json`. Everything the daemon
-  knows lives there; anything a UI needs, it reads there.
+## Project status
 
-## Repo layout
+**Alpha.** Manual scheduling is fully functional; automatic detection is
+deliberately unimplemented until measured.
 
-```
-plugin/                  the Claude Code plugin (engine)
-  .claude-plugin/        manifest
-  hooks/                 Stop/SessionEnd wiring
-  commands/              /task-start, /task-status, /task-cancel
-  scripts/               lib.sh (state helpers), on-stop.sh (hook entry)
-test/
-  fake-claude.sh         claude CLI stub — all iterative testing runs here
-  run-tests.sh           shell test suite
-docs/
-  ARCHITECTURE.md        full design
-  DECISIONS.md           append-only decision log
-  HOOK-FINDINGS.md       probe results (source of truth for detection)
-claude-limit-hook-probe/ throwaway plugin that measures hook behavior
-vscode-extension/        future cockpit (Phase 4)
-```
+| Capability | Status |
+|---|---|
+| Manual post-limit scheduling (`/task-resume-at`) | ✅ Implemented, tested |
+| Resume daemon (tiers, backoff, safety rails) | ✅ Implemented, tested |
+| Task tracking + journal (`/task-start`, `/task-status`, `/task-cancel`) | ✅ Implemented, tested |
+| **Automatic** limit detection via hooks | 🔬 Blocked on probe data — see below |
+| Resume-verification fallback prompt | 🕐 Planned |
+| `/warmup` window scheduler | 🕐 Planned |
+| VS Code cockpit | 🕐 Planned |
 
-## How detection gets built
-
-The exact behavior of Claude Code hooks at a limit hit (which events fire,
-what the payloads and transcript contain) is treated as **unknown until
-measured**. The `claude-limit-hook-probe/` plugin logs every lifecycle
-event; you run it through a real limit hit once, paste the log excerpts
-into `docs/HOOK-FINDINGS.md`, and the detection code is then written
-against those exact shapes — never against guesses.
-
-To run the probe test: see `claude-limit-hook-probe/README.md`. Short
-version: install its hooks, run a session into a limit on purpose (a
-subscription that is already limited works too — any session stop while
-limited produces data), then check `~/.claude/limit-hook-probe/hooks.log`.
+Automatic detection is built strictly against *measured* hook behavior, not
+guesses: the `claude-limit-hook-probe/` instrumentation plugin captures what
+Claude Code actually emits at a limit hit, results land in
+[docs/HOOK-FINDINGS.md](docs/HOOK-FINDINGS.md), and the detection code cites
+them. Until then, the manual `/task-resume-at` flow covers the same need
+with you as the detector.
 
 ## Development
 
@@ -84,39 +148,44 @@ limited produces data), then check `~/.claude/limit-hook-probe/hooks.log`.
 bash test/run-tests.sh
 ```
 
-Runs ~90 tests: the state library against every JSON engine (`jq`,
-`python3`, and a pure awk/sed fallback), cross-engine interop, timestamp
-helpers, the fake-claude stub, and hook smoke tests. Everything iterative
-tests against `test/fake-claude.sh` — real quota is only spent on
-milestone verification.
+119 shell tests: the state library against three JSON engines (`jq`,
+`python3`, pure `awk`/`sed`), cross-engine interop, time parsing, the
+daemon's full lifecycle (clean resume, backoff, tier behavior, cancel,
+caps), and hook smoke tests. All iterative testing runs against
+`test/fake-claude.sh` — a stub that mimics the claude CLI — so development
+never spends real quota.
 
-Ground rules (details in `CLAUDE.md`):
+```text
+plugin/                  the Claude Code plugin
+├── .claude-plugin/      manifest
+├── hooks/               Stop/SessionEnd wiring (detection entry point)
+├── commands/            slash commands
+└── scripts/             lib.sh · daemon.sh · task-*.sh · on-stop.sh
+test/                    fake-claude stub + test suite
+docs/                    user guide, architecture, decisions, findings
+claude-limit-hook-probe/ throwaway hook-instrumentation plugin
+vscode-extension/        future UI (empty)
+```
 
-- Portable bash: macOS (BSD) + Linux (GNU), no hard `jq` dependency.
-- Hooks never break the host: always exit 0, fast, log to file.
-- Safety rails: `max_resumes`, stuck detection, permission allowlist by
-  default.
+Engineering ground rules live in [CLAUDE.md](CLAUDE.md): portable bash
+(BSD + GNU), no hard `jq` dependency, hooks always exit 0 fast, atomic
+state writes, real quota only for milestone verification.
 
-## Honest limitations
+## Limitations
 
-- Window warm-up scheduling (planned `/warmup`) helps the **5-hour rolling
-  window only** — it cannot do anything about weekly caps.
-- Windows support is best-effort via Git Bash/WSL; desktop notifications
-  there are log-only for now.
-- Auto-resume consumes your quota the moment it resets, by design. Use
-  `critical` sparingly.
+Stated plainly, because tools that manage your quota shouldn't oversell:
 
-## Roadmap
-
-- **Phase 1 — Detection** (blocked on probe data): real limit matching,
-  `resume_at` parsing.
-- **Phase 2 — Daemon**: wait loop, importance tiers, resume execution,
-  safety rails.
-- **Phase 3 — Polish**: resume verification, `/warmup` scheduler, packaging.
-- **Phase 4 — VS Code cockpit.**
-- Later: burn-rate awareness, pre-limit checkpointing, model downshift,
-  task queue.
+- **Weekly caps are untouchable.** Scheduling and warm-up tricks help the
+  5-hour rolling window only. Nothing can resume you past a weekly cap.
+- **Resuming spends quota immediately at reset.** That's the point — but
+  use `critical` deliberately.
+- **Windows** is best-effort via Git Bash/WSL; desktop notifications there
+  are currently log-only.
+- **Session identity**: if a task wasn't tracked before the limit hit, the
+  resumed run starts from your workspace's `PROGRESS.md` context rather
+  than `--resume`-ing the exact session (session id capture via hooks
+  arrives with detection).
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+[MIT](LICENSE).

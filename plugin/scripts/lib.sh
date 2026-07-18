@@ -17,6 +17,15 @@ AR_STATE_FILE="${CLAUDE_AUTO_RESUME_STATE:-$HOME/.claude/auto-resume/state.json}
 AR_HOME="$(dirname "$AR_STATE_FILE")"
 AR_LOG_DIR="${CLAUDE_AUTO_RESUME_LOG_DIR:-$AR_HOME/logs}"
 
+# Optional user config (shell syntax, AR_CFG_* variables only — see
+# docs/USER-GUIDE.md). Environment variables always win over config values
+# because consumers read ${CLAUDE_AUTO_RESUME_X:-${AR_CFG_X:-default}}.
+AR_CONFIG_FILE="${CLAUDE_AUTO_RESUME_CONFIG:-$AR_HOME/config}"
+if [ -f "$AR_CONFIG_FILE" ]; then
+  # shellcheck disable=SC1090
+  . "$AR_CONFIG_FILE" 2>/dev/null || true
+fi
+
 # Task fields stored as JSON numbers, not strings.
 AR_NUMERIC_FIELDS=" resume_count max_resumes "
 
@@ -61,7 +70,12 @@ ar_log() {
 ar_notify() {
   # $1: title, $2: body. Best-effort, never blocks, never fails the caller.
   # Chain: osascript (macOS) -> notify-send (Linux) -> log only (D7).
+  # AR_NOTIFY_SILENT=1 forces log-only (used by tests).
   local title="$1" body="${2:-}" t b
+  if [ -n "${AR_NOTIFY_SILENT:-}" ]; then
+    ar_log "notify(silent): $title — $body"
+    return 0
+  fi
   t="$(printf '%s' "$title" | sed 's/\\/\\\\/g; s/"/\\"/g')"
   b="$(printf '%s' "$body" | sed 's/\\/\\\\/g; s/"/\\"/g')"
   if command -v osascript >/dev/null 2>&1; then

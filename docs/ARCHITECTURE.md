@@ -70,6 +70,22 @@ Field notes:
   resume-verification (fallback prompt) and for the UI.
 - **journal** — append-only event history; the UI's timeline source.
 
+## Two entry points into the wait-and-resume cycle
+
+The daemon doesn't care *who* decided a resume is needed — it only reads
+state. Two things write that state:
+
+1. **Manual scheduling (implemented — D10):** the user saw the limit
+   message and runs `/task-resume-at <when>`. The command sets
+   `status=waiting` + `resume_at` and spawns the daemon. No detection
+   involved; the human is the detector.
+2. **Automatic detection (Phase 1, blocked on HOOK-FINDINGS.md):**
+   `on-stop.sh` recognizes the limit in the hook payload/transcript, writes
+   the same fields, spawns the same daemon.
+
+This is why the daemon could ship before detection: the state contract
+decouples them.
+
 ## Lifecycle loop
 
 1. User starts a tracked task: `/task-start <importance> <prompt>`.

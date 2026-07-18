@@ -65,3 +65,33 @@ default branch.
 
 It predates the scaffold, is referenced by HOOK-FINDINGS.md as the measuring
 instrument, and is throwaway after the probe. Its zip is gitignored.
+
+## D10 — 2026-07-18 — Manual post-limit scheduling ships before automatic detection (Phase 2 before Phase 1)
+
+User insight: scheduling doesn't have to precede the limit hit. A user who
+just saw the limit message knows the reset time and can schedule the resume
+manually (`/task-resume-at`). This requires zero payload parsing, so it
+doesn't violate C1 — the human is the detector. Consequence: the daemon
+(Phase 2) was built now and is fully testable against fake-claude, while
+hook detection (Phase 1) stays blocked on probe data. Detection, when it
+lands, plugs into the same daemon by writing the same state fields.
+Untracked workspaces scheduled post-hoc default to importance=critical: an
+explicit schedule means "resume without asking".
+
+## D11 — 2026-07-18 — Daemon pidfiles live outside state.json
+
+One daemon per workspace is enforced with a pidfile at
+`~/.claude/auto-resume/daemons/<cksum-of-path>.pid`. Pids are host-local
+runtime facts, not contract data a UI needs, so keeping them out of
+state.json avoids a schema version bump. Stale pidfiles (dead pid) are
+detected and replaced on the next spawn.
+
+## D12 — 2026-07-18 — Configurable claude binary + extra args via AR_CFG_* config file
+
+`~/.claude/auto-resume/config` (plain shell, AR_CFG_* names only) provides
+`AR_CFG_CLAUDE_BIN` and `AR_CFG_EXTRA_ARGS`. Environment variables
+(CLAUDE_AUTO_RESUME_*) always win because consumers read
+`${ENV:-${AR_CFG:-default}}` — this is what lets tests point the daemon at
+fake-claude (C6) and what lets users add a permission allowlist without the
+tool ever adding `--dangerously-skip-permissions` itself (C5). Distinct
+AR_CFG_* names prevent the sourced config from clobbering env overrides.
