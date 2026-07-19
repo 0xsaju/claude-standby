@@ -51,22 +51,23 @@ session. Detailed rationale for every decision: `docs/DECISIONS.md`
       reference, About row (author links from settings). Screen C: status
       item + rich MarkdownString tool-status tooltip. View state persisted
       across auto-refresh.
-- [x] **Test suite: 229 green** — three JSON engines, daemon lifecycle,
-      auto mode, session discovery/pinning (incl. bad-value refusal),
-      prompt/workspace flags, hooks setup/removal, installer cycle, CLI
-      surface. Cockpit client JS additionally exercised out-of-tree via
-      jsdom (21 assertions: AM/PM conversion, escaping, chip precedence,
-      message wiring) — kept out of the suite to preserve the no-tooling
-      convention.
-- [x] **C6 — Real-limit verification of `--resume` (DONE 2026-07-19).**
-      An actual session limit hit while auto-detect was armed on this repo
-      with session `612fb08b` pinned. The daemon probed, saw the limit
-      lift, ran `claude --resume 612fb08b`, and the *original conversation
-      continued* (this session received the resume prompt). Journal:
-      `scheduled → session-pinned → limit-lifted (probe) → resumed
-      (attempt 2 of 3 — continuing session 612fb08b)`. The primary promise
-      is now proven end-to-end against a genuine limit, not just
-      fake-claude.
+- [x] **Test suite: 236 green** — three JSON engines, daemon lifecycle,
+      auto mode (incl. the armed/limit_seen gate), session
+      discovery/pinning (incl. bad-value refusal), prompt/workspace flags,
+      hooks setup/removal, installer cycle, CLI surface. Cockpit client JS
+      additionally exercised out-of-tree via jsdom (21 assertions: AM/PM
+      conversion, escaping, chip precedence, message wiring) — kept out of
+      the suite to preserve the no-tooling convention.
+- [x] **Auto-detect false-resume bug — fixed 2026-07-19 (D27).** Scheduling
+      auto-detect while NOT rate-limited made the first probe succeed (no
+      limit present), which the daemon mistook for "limit lifted" and
+      resumed — injecting the resume prompt into the *live* session as a
+      parallel headless agent (which even committed to this repo). Root
+      cause: resume fired on any successful probe, with no evidence a limit
+      ever existed. Fix: resume is gated on `limit_seen`; in auto mode it
+      fires only after a limit was observed (a probe failed) and then
+      lifted. With no limit ever seen, the task stays `armed`. 7 regression
+      tests + a live check against the installed daemon.
 
 ## Next
 
@@ -84,6 +85,9 @@ session. Detailed rationale for every decision: `docs/DECISIONS.md`
       store) — move it into the daemon so auto-detect sleeps to the
       inferred reset instead of probing, and populate a concrete time into
       the cockpit's "When" caption. Document as HOOK-FINDINGS F4.
+- [ ] **C6 — real-limit verification of `--resume`** (still open): on a
+      genuine limit, with auto-detect armed and `limit_seen` set, confirm
+      the daemon resumes the pinned session and the conversation continues.
 - [ ] **Phase 3 — Polish:** stuck detection (PROGRESS.md unchanged across
       two resumes), resume-verification fallback prompt, `/warmup`
       scheduler, reboot-surviving schedules (launchd/cron one-shots)
@@ -103,10 +107,13 @@ daemon's own probes create session files that would poison any
 "most recent" lookup (D23; this is also why `--continue` is never used).
 Session discovery reads the measured store layout (HOOK-FINDINGS F2)
 read-only; picks flow through `resume-at --session` in both CLI and
-cockpit. 229 tests green. **C6 is now proven for real** — on 2026-07-19 an
-actual limit hit while auto-detect was armed here, and the daemon resumed
-this pinned session (`612fb08b`) so the conversation continued (see Done).
-A subtle install gotcha surfaced that day: the cockpit drives the CLI at
+cockpit. 236 tests green. **C6 (real-limit `--resume`) is still UNVERIFIED**
+— an earlier PROGRESS note claiming it was proven was written by a rogue
+resume: auto-detect had been scheduled on a *non-limited* session, the
+first probe succeeded, and the daemon resumed a healthy session (D27, now
+fixed). That was the bug, not a verification. Genuine real-limit proof
+still needs an actual limit while auto-detect is armed with `limit_seen`
+set. A subtle install gotcha also surfaced: the cockpit drives the CLI at
 `~/.claude-auto-resume` (a git clone), which can lag the repo — if
 `--session` seems ignored, `git -C ~/.claude-auto-resume pull` to refresh
 it. Still pending: everything blocked on hook-payload data (Phase 1).

@@ -361,3 +361,38 @@ transcript timestamps with zero quota (verified locally on the F2 store),
 but the inference belongs in the bash engine (D21/C1), so the caption is
 generic until the engine populates a concrete time. Documented for a
 future HOOK-FINDINGS F4.
+
+## D27 — 2026-07-19 — Auto-detect resumes only after a limit is actually seen
+
+**Bug.** Scheduling auto-detect (`resume-at auto`) while the account was
+NOT rate-limited caused an immediate, wrong resume. In auto mode the
+daemon resumes as soon as a probe (`claude -p ok`) succeeds — the probe
+means "the limit is gone." But if there was never a limit, the very first
+probe succeeds, so the daemon declared "limit-lifted" and ran
+`claude --resume <id> -p "<resume prompt>"` against the user's *live*
+session — spawning a parallel headless agent that continued (and even
+committed to) the running conversation. Observed live: a healthy session
+with hours of quota left was resumed seconds after scheduling.
+
+**Fix.** A resume may fire only after a limit has actually been *observed*
+and then lifted. New per-task flag `limit_seen` (reset to 0 on every
+schedule): a failing probe sets it (journals `limit-hit` + `limit_seen_at`);
+resume is allowed only when it is set. If a probe succeeds while
+`limit_seen` is unset, the task is *armed* — it keeps watching at the probe
+interval so a FUTURE limit+reset triggers the resume, but it never touches
+a healthy session (journals `armed` once). The auto give-up window is now
+measured from `limit_seen_at` (when the limit was first seen), not from
+daemon start, so a long-armed task doesn't spuriously give up the moment a
+limit finally appears.
+
+**Testing.** Added `AR_DAEMON_ONESHOT` (run one loop iteration then stand
+down) for hermetic single-iteration daemon tests. 7 regression assertions
+cover: not-limited → stays waiting / count 0 / journaled `armed` / no false
+`limit-lifted`|`resumed`; limit observed → `limit_seen=1`, still waiting;
+then lifts → resumes. Also validated live against the installed daemon.
+This class of bug (state fields correct, *semantics* wrong) is why field
+assertions alone were insufficient — the regression tests assert behavior.
+
+**Note.** A prior "C6 verified" PROGRESS entry (commit 442c47a) was written
+by the rogue resume this bug caused; it was corrected — C6 remains
+unverified against a real limit.
