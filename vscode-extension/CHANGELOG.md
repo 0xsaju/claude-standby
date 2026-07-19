@@ -12,6 +12,9 @@ entries describe tool behavior the cockpit now surfaces.
   guess. **Auto-detect** remains for arming in advance (watch and resume
   whenever a limit hits). Each mode shows its own one-line hint. Matches the
   CLI's `resume-at reset`. The tier picker now says the `normal` grace is 5 min.
+- The reset-time reader now honors `CLAUDE_AUTO_RESUME_RATE_FILE` and
+  `AR_CFG_RATE_SOURCE` (matching the CLI), so "At reset" and the CLI never
+  disagree about whether a reset time exists.
 
 ## 0.8.7
 

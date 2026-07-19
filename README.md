@@ -9,8 +9,8 @@ session with context, and never makes you babysit a terminal again.
 
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey)
-![Version](https://img.shields.io/badge/version-0.5.0-informational)
-![Tests](https://img.shields.io/badge/tests-257%20passing-brightgreen)
+![Version](https://img.shields.io/badge/version-0.6.0-informational)
+![Tests](https://img.shields.io/badge/tests-236%20passing-brightgreen)
 ![Status](https://img.shields.io/badge/status-alpha-orange)
 
 [Install](#installation) · [Quick start](#quick-start) ·

@@ -99,6 +99,7 @@ parse_when() {
 # resume fired on the exact reset instant can't bounce off a still-active limit
 # (same knob the daemon uses; D30).
 RESET_GRACE="${AR_RESET_GRACE_SECS:-${AR_CFG_RESET_GRACE:-60}}"
+case "$RESET_GRACE" in ''|*[!0-9]*) RESET_GRACE=60 ;; esac  # >= 0, numeric
 
 RESUME_MODE="at"
 CONFIRMED_LIMIT=""

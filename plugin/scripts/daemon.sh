@@ -34,6 +34,9 @@ GRACE="${AR_NORMAL_GRACE_SECS:-300}"
 # early, from clock skew or the server rounding the window up) bounces off a
 # still-active limit and wastes an attempt; waiting a beat avoids that.
 RESET_GRACE="${AR_RESET_GRACE_SECS:-${AR_CFG_RESET_GRACE:-60}}"
+# Never resume BEFORE the reset: a negative buffer would fire into a still-active
+# limit. Clamp to >= 0 (also guards a non-numeric value).
+case "$RESET_GRACE" in ''|*[!0-9]*) RESET_GRACE=60 ;; esac
 BACKOFF_BASE="${AR_BACKOFF_BASE_SECS:-300}"
 PROBE_INTERVAL="${AR_PROBE_INTERVAL_SECS:-1800}"
 PROBE_MODEL="${AR_PROBE_MODEL:-${AR_CFG_PROBE_MODEL:-haiku}}"
@@ -42,13 +45,12 @@ AUTO_GIVEUP="${AR_AUTO_GIVEUP_SECS:-21600}"
 # it stands down instead of probing forever and burning quota (C6). 0 = no
 # bound (probe until a limit appears or the user cancels). Default 24h.
 ARMED_MAX="${AR_ARMED_MAX_SECS:-86400}"
-# Auto mode prefers the status-line sensor's rate.json (HOOK-FINDINGS F4):
-# exact reset time, quota-free. LIMIT_PCT is the used_percentage at which we
-# treat the account as limited (UNVERIFIED at a real limit — default 100, the
-# conservative choice). RATE_CHECK is the cheap re-read cadence while armed
-# (reading a local file costs nothing, unlike a probe).
+# Auto mode uses the status-line sensor's rate.json (HOOK-FINDINGS F4) for the
+# exact reset TIME once a limit is confirmed (quota-free). LIMIT_PCT is the
+# used_percentage at which the sensor treats the account as limited (UNVERIFIED
+# at a real limit — default 100, the conservative choice). Below it, we do NOT
+# trust "not limited": a probe confirms (F4 must not blind F1).
 LIMIT_PCT="${AR_LIMIT_PCT:-100}"
-RATE_CHECK="${AR_RATE_CHECK_SECS:-300}"
 CLAUDE_BIN="${CLAUDE_AUTO_RESUME_CLAUDE_BIN:-${AR_CFG_CLAUDE_BIN:-claude}}"
 EXTRA_ARGS="${CLAUDE_AUTO_RESUME_EXTRA_ARGS:-${AR_CFG_EXTRA_ARGS:-}}"
 
@@ -182,7 +184,10 @@ while :; do
     # probe path only when rate.json is absent or stale.
     RATE_RESUME=""
     if ar_rate_usable; then
-      USED="$(ar_rate_get used_percentage)"; USED="${USED%%.*}"; USED="${USED:-0}"
+      USED="$(ar_rate_get used_percentage)"; USED="${USED%%.*}"
+      # Guard against a null/blank/non-numeric reading (e.g. JSON null -> "None"):
+      # treat anything not all-digits as 0 so the -ge comparison can't error out.
+      case "$USED" in ''|*[!0-9]*) USED=0 ;; esac
       RESETS_AT="$(ar_rate_get resets_at)"
       RESET_ISO="$(ar_epoch_to_iso "$RESETS_AT")"
       if [ "$USED" -ge "$LIMIT_PCT" ]; then
@@ -209,24 +214,13 @@ while :; do
         ar_journal_append "$WS" "limit-lifted" "sensor: usage fell to ${USED}% — limit reset"
         RATE_RESUME=1
       else
-        # Not limited, never was: armed. No probe, no quota. Re-read the
-        # sensor cheaply on a short cadence; bound the armed window (C6).
-        ARMED_SINCE="$(ar_task_get "$WS" armed_since)"
-        if [ -z "$ARMED_SINCE" ]; then ARMED_SINCE="$NOW"; ar_task_set "$WS" armed_since "$NOW"; fi
-        if [ "$ARMED_MAX" -gt 0 ] && [ $((NOW - ARMED_SINCE)) -ge "$ARMED_MAX" ]; then
-          ar_task_set "$WS" status failed
-          ar_journal_append "$WS" "failed" "armed ${ARMED_MAX}s with no limit — stood down; reschedule when you expect one"
-          ar_notify "Auto-resume stood down" "No limit hit in $((ARMED_MAX / 3600))h for $WS. Reschedule when you expect to hit one."
-          stand_down "armed window exceeded (sensor)"
-        fi
-        ar_task_set "$WS" resume_at "$(ar_epoch_to_iso $((NOW + RATE_CHECK)) )"
-        if [ "$(ar_task_get "$WS" armed_noted)" != "1" ]; then
-          ar_task_set "$WS" armed_noted 1
-          ar_journal_append "$WS" "armed" "not limited (${USED}% used) — will resume when you hit the limit; reset at $RESET_ISO"
-        fi
-        ar_log "daemon[$$]: armed via sensor (${USED}% used); reset $RESET_ISO"
-        [ -n "${AR_DAEMON_ONESHOT:-}" ] && stand_down "oneshot: armed via sensor"
-        continue
+        # Sensor says NOT limited — but used_percentage at a real block is
+        # unverified (C6) and can under-report, and F4 must not blind F1. So we
+        # do NOT trust "not limited" from the sensor: fall through to the probe
+        # (F1) as the detector, which arms, bounds (ARMED_MAX), and paces this
+        # case on $PROBE_INTERVAL. The sensor still supplies the exact reset
+        # TIME the moment a limit is actually confirmed (fast path above).
+        ar_log "daemon[$$]: sensor ${USED}% (<${LIMIT_PCT}%); probing to confirm (reset would be $RESET_ISO)"
       fi
     fi
 

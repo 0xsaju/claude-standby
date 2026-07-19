@@ -70,6 +70,11 @@ Schema changes require a `version` bump and an entry in `docs/DECISIONS.md`.
       "resume_prompt_template": "Limit reset. Continue from where you stopped. Check PROGRESS.md first.",
       "last_output_tail": "",
       "progress_file": "PROGRESS.md",
+      "limit_seen": "0 | 1 — a limit was actually observed (gates auto-mode resume, D27)",
+      "limit_seen_at": "epoch when the limit was first observed (give-up window)",
+      "armed_noted": "0 | 1 — the 'armed, waiting for a limit' note was journaled once",
+      "armed_since": "epoch when arming began (bounds the armed window, D28)",
+      "daemon_pid": "pid of the daemon that owns this task (interrupted-resume detection, D28)",
       "journal": [
         { "ts": "", "event": "limit-hit | resumed | done | failed | cancelled", "detail": "" }
       ]
@@ -161,18 +166,21 @@ isn't measured there, the code doesn't parse it.
 task detects and times a reset from local data documented in HOOK-FINDINGS,
 never from invented shapes:
 
-1. **Rate snapshot (F4, preferred).** If a rate snapshot is available
-   (`rate.json` from the sensor, or a pre-existing cache — see the
+1. **Rate snapshot (F4) for the exact reset TIME.** If a rate snapshot is
+   available (`rate.json` from the sensor, or a pre-existing cache — see the
    status-line sensor component), the daemon reads `used_percentage` and the
-   exact `resets_at`. `used_percentage >= AR_LIMIT_PCT` (default 100) means
-   limited; it then waits for the exact reset — no probe, no quota. Below the
-   threshold with no limit yet seen, the task stays *armed*, re-reading the
-   snapshot cheaply and standing down after `AR_ARMED_MAX_SECS` (C6).
-2. **Probe fallback (F1).** With no snapshot, the daemon fires one minimal
-   `haiku` probe. A limit is trusted from the measured limit **message**, not
-   the exit code (claude may exit 0 while limited). If the message announces
-   a reset time (`…resets 4:10pm (Asia/Dhaka)`), the daemon waits for exactly
-   that moment; otherwise it polls on `AR_PROBE_INTERVAL_SECS`.
+   exact `resets_at`. `used_percentage >= AR_LIMIT_PCT` (default 100) is taken
+   as limited; it then waits for the exact reset — no probe, no quota. But the
+   sensor's `used_percentage` at a real block is **unverified** (C6) and can
+   under-report, so the daemon does **not** trust "not limited" from it: below
+   the threshold, with no limit yet seen, it falls through to the probe below
+   (F4 must not blind F1). It still stands down after `AR_ARMED_MAX_SECS` (C6).
+2. **Probe (F1) as the detector.** The daemon fires one minimal `haiku` probe
+   (whenever no snapshot exists, or the snapshot is below the limit threshold).
+   A limit is trusted from the measured limit **message**, not the exit code
+   (claude may exit 0 while limited). If the message announces a reset time
+   (`…resets 4:10pm (Asia/Dhaka)`), the daemon waits for exactly that moment;
+   otherwise it polls on `AR_PROBE_INTERVAL_SECS`.
 
 Either way a resume only fires after a limit was actually **observed** and
 then lifted (`limit_seen`) — scheduling auto-detect while healthy leaves the

@@ -46,13 +46,15 @@ ar_now_iso() {
 }
 
 ar_iso_to_epoch() {
-  # $1: ISO-8601 like 2026-07-18T13:00:00+0600 (tolerates +06:00 too)
+  # $1: ISO-8601 like 2026-07-18T13:00:00+0600 (tolerates +06:00 and a
+  # trailing Z for UTC, e.g. from a third-party status-line cache)
   local iso="$1" norm
-  norm="$(printf '%s' "$iso" | sed 's/\([+-][0-9][0-9]\):\([0-9][0-9]\)$/\1\2/')"
+  # Colon-strip the offset for BSD %z, and turn a trailing Z into +0000.
+  norm="$(printf '%s' "$iso" | sed 's/\([+-][0-9][0-9]\):\([0-9][0-9]\)$/\1\2/; s/Z$/+0000/')"
   date -j -f '%Y-%m-%dT%H:%M:%S%z' "$norm" '+%s' 2>/dev/null && return 0  # BSD
-  date -d "$iso" '+%s' 2>/dev/null && return 0                            # GNU
+  date -d "$iso" '+%s' 2>/dev/null && return 0                            # GNU (handles Z)
   if command -v python3 >/dev/null 2>&1; then
-    python3 -c 'import sys,datetime; print(int(datetime.datetime.fromisoformat(sys.argv[1]).timestamp()))' \
+    python3 -c 'import sys,datetime; print(int(datetime.datetime.fromisoformat(sys.argv[1].replace("Z","+00:00")).timestamp()))' \
       "$iso" 2>/dev/null && return 0
   fi
   return 1
@@ -671,9 +673,11 @@ ar_rate_get() {
         python3) python3 -c 'import sys,json
 try:
     d=json.load(open(sys.argv[1])); v=d.get("used_percentage", d.get("rate_pct",""))
-    print("" if v=="" else v)
+    if v is None: v=d.get("rate_pct","")
+    print("" if v in ("", None) else v)
 except Exception: pass' "$rf" 2>/dev/null ;;
-        *) grep -oE "\"(used_percentage|rate_pct)\"[[:space:]]*:[[:space:]]*[0-9.]+" "$rf" 2>/dev/null | head -1 | sed 's/.*:[[:space:]]*//' ;;
+        *) { grep -oE "\"used_percentage\"[[:space:]]*:[[:space:]]*[0-9.]+" "$rf" 2>/dev/null
+             grep -oE "\"rate_pct\"[[:space:]]*:[[:space:]]*[0-9.]+" "$rf" 2>/dev/null; } | head -1 | sed 's/.*:[[:space:]]*//' ;;
       esac ;;
     resets_at)
       # Normalize to epoch so an external cache storing an ISO timestamp

@@ -526,14 +526,28 @@ printf '{"rate_limits":{"five_hour":{"used_percentage":33,"resets_at":%s}}}' "$R
 t_contains "sensor: captures used_percentage into rate.json" '"used_percentage": 33' \
   "$(cat "$CLAUDE_AUTO_RESUME_RATE_FILE")"
 
-# armed via sensor (low usage): waiting, no limit_seen, no probe
+# armed via sensor (low usage): the sensor says "not limited", but we do NOT
+# trust used_percentage (unverified at a real block) — we fall through to a
+# probe as a backstop. Probe is clean here, so the task stays armed, no limit.
 WSR1="$DTMP/ws-rate-armed"; mkdir -p "$WSR1"
 (cd "$WSR1" && AR_NO_DAEMON=1 bash "$PLUGIN/scripts/task-resume-at.sh" auto critical >/dev/null)
 mkrate 20
+printf 'clean' > "$MODEFILE"
 AR_DAEMON_ONESHOT=1 bash "$PLUGIN/scripts/daemon.sh" "$WSR1"
 t_eq "rate: armed (low usage) stays waiting" "waiting" "$(ar_task_get "$WSR1" status)"
 t_eq "rate: armed keeps limit_seen 0" "0" "$(ar_task_get "$WSR1" limit_seen)"
-t_contains "rate: armed journaled with usage %" "% used" "$(ar_journal_show "$WSR1" 3)"
+t_contains "rate: armed journaled" "will resume after you hit a limit" "$(ar_journal_show "$WSR1" 3)"
+
+# F4 must not blind F1: the sensor under-reports (used 20 < 100) but a probe
+# detects a real limit — the backstop catches it (limit_seen=1) instead of
+# leaving a genuinely-limited task stranded "armed" until it stands down.
+WSR1b="$DTMP/ws-rate-underreport"; mkdir -p "$WSR1b"
+(cd "$WSR1b" && AR_NO_DAEMON=1 bash "$PLUGIN/scripts/task-resume-at.sh" auto critical >/dev/null)
+mkrate 20
+printf 'limit' > "$MODEFILE"
+AR_DAEMON_ONESHOT=1 bash "$PLUGIN/scripts/daemon.sh" "$WSR1b"
+t_eq "rate: sensor under-reports but the probe backstop catches the limit" "1" "$(ar_task_get "$WSR1b" limit_seen)"
+printf 'clean' > "$MODEFILE"
 
 # limited via sensor (100%): limit_seen=1, schedules the reset time plus the
 # post-reset safety grace (default 60s) so we don't attempt on the exact dot.

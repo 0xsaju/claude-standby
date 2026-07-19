@@ -319,8 +319,7 @@ work (claude missing).
 ### `claude-auto-resume update`
 
 Updates the install in place (`git pull` under the hood; falls back to
-pointing you at the installer). After updating, refresh the Claude Code
-plugin inside a session if you use it.
+pointing you at the installer).
 
 ### `claude-auto-resume uninstall [--yes]`
 
@@ -365,8 +364,7 @@ Optional config file: `~/.claude/auto-resume/config` (plain shell,
 | `AR_CFG_PROBE_MODEL` | `AR_PROBE_MODEL` | `haiku` | Auto mode: model for the probe call |
 | — | `AR_AUTO_GIVEUP_SECS` | `21600` | Auto mode: give up after this long still limited (6 h ≈ "must be a weekly cap") |
 | `AR_CFG_RATE_SOURCE` | `CLAUDE_AUTO_RESUME_RATE_FILE` | *(auto)* | Path to the rate snapshot with the exact reset time. Resolution order: this env → this config → our sensor's `rate.json` → `/tmp/claude_rate_cache_$USER.json` |
-| — | `AR_LIMIT_PCT` | `100` | Auto mode: `used_percentage` at which the sensor treats you as limited (conservative default; unverified against a real limit) |
-| — | `AR_RATE_CHECK_SECS` | `300` | Auto mode: how often the daemon re-reads the rate snapshot while armed (no quota) |
+| — | `AR_LIMIT_PCT` | `100` | Auto mode: `used_percentage` at which the sensor treats you as limited (conservative default; unverified against a real limit). Below it, the daemon still probes to be sure — it never trusts the sensor's "not limited" alone |
 | — | `AR_ARMED_MAX_SECS` | `86400` | Auto mode: stand down after this long armed with no limit seen (`0` = never; protects quota) |
 | — | `AR_NOTIFY_SILENT` | *(unset)* | Set to `1` to suppress desktop notifications |
 

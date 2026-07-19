@@ -83,6 +83,16 @@ session. Detailed rationale for every decision: `docs/DECISIONS.md`
 
 ## Next
 
+- [x] **Go-live audit (5 parallel reviewers) — 2026-07-19 (D34).** Fixed the one
+      medium finding: F4 blinded F1 — a usable rate snapshot suppressed the probe
+      entirely, so an under-reporting sensor (C6) could strand a genuinely-limited
+      auto task "armed" until stand-down. Now the sensor is trusted only for the
+      exact reset TIME / a positive "limited" reading; a "not limited" reading
+      falls through to a probe (F1 detector). Removed dead `AR_RATE_CHECK_SECS`.
+      Edge fixes: clamp negative reset grace; guard null `used_percentage`; text
+      engine prefers `used_percentage`; `Z`/UTC timestamp parsing; cockpit
+      `readRate` honors the rate-source overrides. Docs/badges reconciled
+      (README 0.6.0 / 236 tests). +1 backstop test → 237 green, flake-checked.
 - [x] **Cockpit "At reset" composer option — 2026-07-19.** The dashboard When
       picker now offers **At reset** (selected by default when a local reset time
       is known) alongside **Auto-detect** / 30m / 1h / 2h — mapping to the CLI's

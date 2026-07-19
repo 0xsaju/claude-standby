@@ -93,9 +93,26 @@ function readTask() {
 // our sensor's rate.json or a status-line cache already on disk (mirrors
 // ar_rate_file in lib.sh). Returns { resetsAt(epoch), usedPct, source } or
 // null. Zero setup: if a file with the time is there, we just read it.
+// Mirror lib.sh ar_rate_file()'s priority so the cockpit and the CLI never
+// disagree about whether a reset time exists: env override, then the config's
+// AR_CFG_RATE_SOURCE, then our rate.json, then a common /tmp cache.
+function rateSourceOverride() {
+  if (process.env.CLAUDE_AUTO_RESUME_RATE_FILE) return process.env.CLAUDE_AUTO_RESUME_RATE_FILE;
+  try {
+    const cfg = fs.readFileSync(path.join(AR_HOME, 'config'), 'utf8');
+    const m = cfg.match(/^\s*AR_CFG_RATE_SOURCE\s*=\s*["']?([^"'#\n]+?)["']?\s*$/m);
+    if (m && m[1].trim()) return m[1].trim();
+  } catch {
+    /* no config file */
+  }
+  return null;
+}
+
 function readRate() {
   const user = process.env.USER || (os.userInfo && os.userInfo().username) || '';
+  const override = rateSourceOverride();
   const candidates = [
+    ...(override ? [override] : []),
     path.join(AR_HOME, 'rate.json'),
     `/tmp/claude_rate_cache_${user}.json`,
   ];

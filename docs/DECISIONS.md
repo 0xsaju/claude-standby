@@ -560,3 +560,34 @@ directory name is now legacy (just the engine scripts); renaming it was left out
 avoid churning every `${...}/plugin/scripts` path. Existing users with the old
 plugin installed are told to `/plugin uninstall claude-auto-resume@auto-resume`
 (printed by `uninstall` and the installer's `--uninstall`).
+
+## D34 — 2026-07-19 — Go-live audit: F4 must not blind F1, plus rate-reader hardening
+
+A parallel multi-reviewer audit before go-live surfaced one medium issue and a
+handful of edges.
+
+**F4 must not blind F1 (the medium one).** In auto mode, once any usable rate
+snapshot existed, the F4 block always `continue`d, so the F1 probe never ran.
+If the sensor's `used_percentage` under-reports at a real block (it's
+UNVERIFIED, C6 — e.g. reads 96 while `LIMIT_PCT=100`), a genuinely-limited task
+would sit "armed" and stand down after `AR_ARMED_MAX_SECS` without ever
+resuming. Fix: the sensor is trusted only for the exact reset TIME and for a
+positive "limited" reading; when it says "not limited" (below the threshold,
+no limit seen yet), the daemon now falls through to the probe (F1) as the
+detector. Detection latency doesn't matter (we resume at the reset, not at
+detection), so probing on `AR_PROBE_INTERVAL` while armed is fine and correct.
+`AR_RATE_CHECK_SECS` is removed (the cheap armed re-read it paced is gone).
+
+**Edge fixes (low):** clamp `AR_RESET_GRACE_SECS` to a non-negative numeric
+(a negative buffer would resume before the reset); guard a null/blank/non-
+numeric `used_percentage` (JSON `null` → `"None"`) before the `-ge` compare;
+the text JSON engine now prefers `used_percentage` over `rate_pct` (matching
+jq/python) instead of first-in-file; `ar_iso_to_epoch` normalizes a trailing
+`Z` (UTC) so third-party caches parse on BSD/old-python; the cockpit's
+`readRate` now honors `CLAUDE_AUTO_RESUME_RATE_FILE` and `AR_CFG_RATE_SOURCE`
+(mirroring `ar_rate_file`) so the "At reset" chip and the CLI never disagree.
+
+Docs/badges reconciled (README version 0.6.0 / tests 236; removed a stale
+"refresh the plugin" line; ARCHITECTURE schema + auto-detect wording). +1 test
+proving the under-report backstop; the audit's clean items (dead-ref sweep,
+CLI/install integrity) had no findings.
