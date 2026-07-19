@@ -10,10 +10,10 @@ session with context, and never makes you babysit a terminal again.
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey)
 ![Version](https://img.shields.io/badge/version-0.6.0-informational)
-![Tests](https://img.shields.io/badge/tests-236%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-237%20passing-brightgreen)
 ![Status](https://img.shields.io/badge/status-alpha-orange)
-[![VS Marketplace](https://img.shields.io/visual-studio-marketplace/v/0xsaju.claude-auto-resume-cockpit?label=VS%20Marketplace&color=0066b8)](https://marketplace.visualstudio.com/items?itemName=0xsaju.claude-auto-resume-cockpit)
-[![Open VSX](https://img.shields.io/open-vsx/v/0xsaju/claude-auto-resume-cockpit?label=Open%20VSX&color=a60ee5)](https://open-vsx.org/extension/0xsaju/claude-auto-resume-cockpit)
+[![VS Marketplace](https://img.shields.io/badge/VS_Marketplace-Install-0066b8?logo=visualstudiocode&logoColor=white)](https://marketplace.visualstudio.com/items?itemName=0xsaju.claude-auto-resume-cockpit)
+[![Open VSX](https://img.shields.io/badge/Open_VSX-Install-a60ee5)](https://open-vsx.org/extension/0xsaju/claude-auto-resume-cockpit)
 
 [Install](#installation) · [Quick start](#quick-start) ·
 [Commands](#commands) · [How it works](#how-it-works) ·

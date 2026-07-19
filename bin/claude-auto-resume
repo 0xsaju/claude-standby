@@ -1,33 +1,27 @@
 #!/usr/bin/env bash
-# claude-auto-resume — auto-resume Claude Code tasks after usage-limit hits.
+# claude-auto-resume — survive Claude Code usage limits: wait for the reset,
+# then resume the same conversation. Zero tokens; runs even while you're limited.
 #
-# Zero token cost; works while rate-limited (when no in-session command
-# could run).
+# Usage:  claude-auto-resume <command> [options]          (tip: alias car=…)
 #
-# Usage:
-#   claude-auto-resume [status]                     show this workspace's task
-#   claude-auto-resume start <tier> <description>   track this workspace
-#   claude-auto-resume resume-at [when] [tier] [--session <n|id|latest|new>]
-#                        [--prompt "<text>"] [--workspace <path>]
-#                                                   schedule resume (default: auto,
-#                                                   continuing the newest session;
-#                                                   --prompt = custom resume message,
-#                                                   --workspace = another project)
-#   claude-auto-resume sessions [--workspace <path>]
-#                                                   list a workspace's Claude
-#                                                   sessions (pick one to resume)
-#   claude-auto-resume cancel                       cancel tracking
-#   claude-auto-resume list                         all tracked workspaces
-#   claude-auto-resume log [n]                      last n log lines (default 40)
-#   claude-auto-resume watch                        follow the log live
-#   claude-auto-resume doctor                       check the environment
-#   claude-auto-resume setup-statusline             capture the exact reset time (F4, opt-in)
-#   claude-auto-resume remove-statusline            remove the status-line sensor
-#   claude-auto-resume update                       update to the latest version
-#   claude-auto-resume uninstall [--yes]            remove the tool
-#   claude-auto-resume version                      print the version
+# After you hit a limit (run from your project directory):
+#   resume-at reset                  resume at your 5-hour reset — exact, no probe
+#   resume-at auto                   arm & watch: resume whenever a limit hits
+#   resume-at 20:00 | 2h30m | now    resume at a time you name (also ISO-8601)
+#     add:  [critical|normal|low]  [--session <n|id|latest|new>]
+#           [--prompt "<text>"]  [--workspace <path>]
 #
-# Suggested alias:  alias car='claude-auto-resume'
+# Check & control:
+#   status              this project's task (the default command)
+#   sessions            list this project's conversations (pick which resumes)
+#   list                every tracked project
+#   watch | log [n]     follow / show the daemon log
+#   cancel              stop the scheduled resume
+#   doctor              environment health check
+#
+# Setup & maintenance:
+#   setup-statusline | remove-statusline   opt-in: capture the exact reset time
+#   update  |  uninstall [--yes]  |  version
 set -u
 
 ORIG0="$0"

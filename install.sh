@@ -48,13 +48,14 @@ esac
 
 if command -v git >/dev/null 2>&1; then
   if [ -d "$INSTALL_DIR/.git" ]; then
-    say "Updating existing install in $INSTALL_DIR ..."
+    say "Updating existing install …"
     git -C "$INSTALL_DIR" pull --ff-only >/dev/null 2>&1 || die "git pull failed in $INSTALL_DIR"
   else
     [ -e "$INSTALL_DIR" ] && die "$INSTALL_DIR exists but is not a git clone — move it aside first"
-    say "Cloning into $INSTALL_DIR ..."
+    say "Downloading claude-auto-resume …"
     # shellcheck disable=SC2086
-    git clone --quiet --depth 1 ${CAR_REF:+--branch "$CAR_REF"} "$REPO_URL" "$INSTALL_DIR" || die "git clone failed"
+    git clone --quiet --depth 1 ${CAR_REF:+--branch "$CAR_REF"} "$REPO_URL" "$INSTALL_DIR" 2>/dev/null \
+      || die "download failed — check your network, or grab it from https://github.com/0xsaju/claude-auto-resume"
   fi
 elif command -v curl >/dev/null 2>&1 && command -v tar >/dev/null 2>&1; then
   say "git not found — downloading tarball ..."
@@ -70,23 +71,37 @@ bash -n "$INSTALL_DIR/plugin/scripts/lib.sh" || die "installed scripts failed a 
 
 mkdir -p "$BIN_DIR"
 ln -sf "$INSTALL_DIR/bin/claude-auto-resume" "$LINK"
-say "Linked $LINK -> $INSTALL_DIR/bin/claude-auto-resume"
+VER="$(head -1 "$INSTALL_DIR/VERSION" 2>/dev/null | tr -d '[:space:]')"
+
+# "Linked" line kept for scripts/tests that look for it; kept terse.
+say "Linked → $LINK"
+
+say ""
+say "  ✓  claude-auto-resume ${VER:+v$VER} is ready"
+say ""
+say "     Survive Claude Code usage limits: it waits for the reset and"
+say "     resumes your exact conversation. Zero tokens — it even runs"
+say "     while you're limited."
+say ""
+say "  When you hit a limit, from your project directory:"
+say ""
+say "     claude-auto-resume resume-at reset    resume at your 5-hour reset"
+say "     claude-auto-resume resume-at auto     or: watch and resume for me"
+say ""
+say "  Anytime:  status  ·  doctor  ·  watch  ·  cancel  ·  help"
+say ""
+say "  Optional GUI — search \"Claude Auto-Resume\" in your editor's"
+say "  Extensions view (VS Code Marketplace or Open VSX)."
+say ""
+say "  Docs:  https://github.com/0xsaju/claude-auto-resume"
 
 case ":$PATH:" in
   *":$BIN_DIR:"*) ;;
   *)
     say ""
-    say "NOTE: $BIN_DIR is not on your PATH. Add this to your shell rc:"
-    say "  export PATH=\"$BIN_DIR:\$PATH\""
+    say "  ⚠  $BIN_DIR is not on your PATH. Add this to your shell rc,"
+    say "     then restart your shell:"
+    say "       export PATH=\"$BIN_DIR:\$PATH\""
     ;;
 esac
-
 say ""
-say "✓ claude-auto-resume installed."
-say ""
-say "Terminal usage (zero tokens — works even while rate-limited):"
-say "  claude-auto-resume resume-at    # after a limit hit: auto-detect reset + resume"
-say "  claude-auto-resume status       # this workspace's task"
-say "  claude-auto-resume watch        # follow the daemon log"
-say ""
-say "Manual: $INSTALL_DIR/docs/USER-GUIDE.md"
