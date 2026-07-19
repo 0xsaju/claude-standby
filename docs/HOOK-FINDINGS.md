@@ -116,6 +116,53 @@ From `claude --help`, Claude Code 2.1.214:
 - Code citing this finding: `do_resume()` in `plugin/scripts/daemon.sh`,
   `plugin/scripts/task-resume-at.sh` session pinning.
 
+### F4 — 2026-07-19 — Exact rate-limit state via the statusline (MEASURED)
+
+Claude Code passes live rate-limit state to the **status line** command on
+stdin (it does NOT write it to any standalone file, and — measured below —
+it does NOT put it in Stop/SessionEnd hook payloads). Fields, read straight
+from a working statusline (`~/.claude/statusline-command.sh`, Claude Code
+2.1.214, macOS):
+
+```
+.rate_limits.five_hour.used_percentage      # integer 0..100
+.rate_limits.five_hour.resets_at            # exact reset time
+```
+
+- `resets_at` sample: `1784462400` — a **Unix epoch** (= 2026-07-19
+  18:00:00 +06). The reference statusline (line 203) also handles an ISO-8601
+  form, so the raw value may be **epoch or ISO** depending on version;
+  consumers must accept both.
+- `used_percentage` sample: `19`, observed ticking `19 → 22` live while
+  Claude Code ran — so the statusline is refreshed continuously and the
+  value is current.
+- This is the same data third-party monitors (e.g. Orca) display
+  ("Session 18% used · resets in 3h 17m"). It matched F1's limit-message
+  reset time and the account's real window.
+- There is very likely also a `.rate_limits.weekly` (and per-model) window —
+  Orca shows Weekly + a model cap — but only `five_hour` was read here; the
+  weekly path name is **unconfirmed**.
+
+**Measured negative — the hook does NOT carry this.** With hooks installed,
+`~/.claude/auto-resume/logs/hook-payloads.log` held 815 captured
+Stop/SessionEnd payloads (3.2 MB); grep for
+`rate_limits|resets_at|five_hour|used_percentage` returned **zero**. So the
+reset time is reachable from the **statusline surface only**, not the hook
+sensor. This answers part of Q1/Q4: the Stop hook alone can't supply the
+reset time.
+
+**UNVERIFIED against a real limit (like C6):** the exact `used_percentage`
+value at the moment Claude Code actually blocks is not measured (no limited
+sample captured with the statusline). Detection defaults to "limited when
+`used_percentage >= 100`" (`AR_LIMIT_PCT`, configurable) — conservative, but
+confirm the true value on the next real limit hit. Also unknown: whether the
+statusline keeps refreshing (and thus keeps `rate.json` fresh) once blocked.
+
+- Code citing this finding: `plugin/scripts/statusline.sh` (the sensor that
+  writes `~/.claude/auto-resume/rate.json`), `ar_rate_*` in
+  `plugin/scripts/lib.sh`, the rate-aware auto path in
+  `plugin/scripts/daemon.sh`, and `setup-statusline` registration.
+
 ## Consequences once filled
 
 - `plugin/scripts/on-stop.sh` `detect_limit()` gets real matching.

@@ -436,3 +436,41 @@ task stands down after the window (status failed, journaled, no resume);
 `ARMED_MAX=0` keeps waiting. The cockpit `isDaemonStuck` logic is exercised
 out-of-tree over all four cases (non-resuming, alive, dead→stuck, blank→
 not-stuck). Plugin 0.4.0, extension 0.8.5.
+
+## D29 — 2026-07-19 — Exact reset time from local data (no polling)
+
+Auto-detect used to blind-probe every 30 min because it didn't know the
+reset time. It turns out Claude Code streams the exact rate-limit state to
+the **status line** — `.rate_limits.five_hour.{used_percentage, resets_at}`
+(HOOK-FINDINGS F4, measured). It does NOT write this to any file itself, and
+it is NOT in the Stop-hook payload (measured: 815 captured payloads, zero
+hits). But a status line that caches it (common) leaves it on disk.
+
+**Design — read a file if one exists; produce one only if needed.**
+- The daemon reads a rate snapshot resolved in priority order (`ar_rate_file`):
+  `CLAUDE_AUTO_RESUME_RATE_FILE` → `AR_CFG_RATE_SOURCE` (point us at your own
+  cache) → our sensor's `rate.json` → a common status-line cache
+  (`/tmp/claude_rate_cache_$USER.json`). Fields tolerate `used_percentage`
+  **or** `rate_pct`, and `resets_at` as epoch **or** ISO.
+- If a file already has the time, we just read it — **zero setup** (this is
+  the answer to "why an extra command?"). The sensor
+  (`statusline.sh` + `setup-statusline`, opt-in, chains any existing status
+  line) is only the fallback that PRODUCES the file for users who have none.
+- Auto mode: rate usable → detection via `used_percentage >= AR_LIMIT_PCT`
+  (default 100) and the resume is scheduled to the EXACT `resets_at` — no
+  probe, no quota. Rate absent/stale → the existing probe path, unchanged.
+  Armed re-checks read the file cheaply (`AR_RATE_CHECK_SECS`, 300) instead
+  of probing. `doctor` shows the source, reset time, and used %.
+
+**UNVERIFIED (like C6):** the exact `used_percentage` when Claude Code
+actually blocks isn't measured, and whether the status line keeps refreshing
+once blocked. `AR_LIMIT_PCT=100` is the conservative default; confirm on a
+real limit. The armed-window bound (D28) still prevents an indefinite wait.
+
+**Testing.** +14 suite tests (sensor capture, three-engine reader,
+armed/limited/resume/fallback, setup-statusline chain+restore). Plus an
+exhaustive corner pass that found and fixed three real bugs: the sensor
+wrote to the wrong path (ignored the override); the text engine mangled an
+ISO `resets_at` with a greedy sed; a bare-string `statusLine` was dropped on
+registration. Cockpit shows the real reset ("resets 6:00 PM · 40% used";
+"armed · resets" vs "resumes" by limit_seen). Plugin 0.5.0, extension 0.8.7.

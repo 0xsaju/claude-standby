@@ -282,6 +282,10 @@ rm -rf "$PTMP"
 DTMP="$(mktemp -d "${TMPDIR:-/tmp}/ar-test-XXXXXX")"
 DTMP="$(cd "$DTMP" && pwd)"   # normalize: workspace keys come from pwd
 export CLAUDE_AUTO_RESUME_STATE="$DTMP/state.json"
+# Pin the rate snapshot to an isolated (absent) path so tests never read a
+# real status-line cache on the dev machine (/tmp/claude_rate_cache_*).
+# Rate-sensor tests point it at a file they control, then reset it here.
+export CLAUDE_AUTO_RESUME_RATE_FILE="$DTMP/rate.json"
 export CLAUDE_AUTO_RESUME_LOG_DIR="$DTMP/logs"
 export CLAUDE_AUTO_RESUME_CLAUDE_BIN="$HERE/fake-claude.sh"
 export CLAUDE_PROJECTS_DIR="$DTMP/projects"   # hermetic: no real session store
@@ -484,6 +488,71 @@ WS19="$DTMP/ws-armed-nobound"; mkdir -p "$WS19"
 ar_task_set "$WS19" armed_since "$(( $(date +%s) - 100000 ))"
 AR_ARMED_MAX_SECS=0 AR_DAEMON_ONESHOT=1 bash "$PLUGIN/scripts/daemon.sh" "$WS19"
 t_eq "armed-bound: ARMED_MAX=0 keeps waiting" "waiting" "$(ar_task_get "$WS19" status)"
+
+# --- rate-sensor auto path (HOOK-FINDINGS F4) --------------------------------
+# A dedicated rate file so these don't perturb the probe-path tests (which
+# rely on the default rate.json being absent). Unset again at the end.
+export CLAUDE_AUTO_RESUME_RATE_FILE="$DTMP/rate-sensor.json"
+RFUT=$(( $(date +%s) + 3600 ))
+mkrate() { printf '{ "captured_at": %s, "resets_at": %s, "used_percentage": %s }\n' \
+  "$(date +%s)" "$RFUT" "$1" > "$CLAUDE_AUTO_RESUME_RATE_FILE"; }
+
+# the status-line sensor captures rate_limits into rate.json
+printf '{"rate_limits":{"five_hour":{"used_percentage":33,"resets_at":%s}}}' "$RFUT" |
+  bash "$PLUGIN/scripts/statusline.sh"
+t_contains "sensor: captures used_percentage into rate.json" '"used_percentage": 33' \
+  "$(cat "$CLAUDE_AUTO_RESUME_RATE_FILE")"
+
+# armed via sensor (low usage): waiting, no limit_seen, no probe
+WSR1="$DTMP/ws-rate-armed"; mkdir -p "$WSR1"
+(cd "$WSR1" && AR_NO_DAEMON=1 bash "$PLUGIN/scripts/task-resume-at.sh" auto critical >/dev/null)
+mkrate 20
+AR_DAEMON_ONESHOT=1 bash "$PLUGIN/scripts/daemon.sh" "$WSR1"
+t_eq "rate: armed (low usage) stays waiting" "waiting" "$(ar_task_get "$WSR1" status)"
+t_eq "rate: armed keeps limit_seen 0" "0" "$(ar_task_get "$WSR1" limit_seen)"
+t_contains "rate: armed journaled with usage %" "% used" "$(ar_journal_show "$WSR1" 3)"
+
+# limited via sensor (100%): limit_seen=1, schedules the EXACT reset time
+WSR2="$DTMP/ws-rate-limited"; mkdir -p "$WSR2"
+(cd "$WSR2" && AR_NO_DAEMON=1 bash "$PLUGIN/scripts/task-resume-at.sh" auto critical >/dev/null)
+mkrate 100
+AR_DAEMON_ONESHOT=1 bash "$PLUGIN/scripts/daemon.sh" "$WSR2"
+t_eq "rate: limited sets limit_seen" "1" "$(ar_task_get "$WSR2" limit_seen)"
+t_eq "rate: schedules the EXACT reset time" "$(ar_epoch_to_iso "$RFUT")" "$(ar_task_get "$WSR2" resume_at)"
+
+# seen a limit, then usage fell: resumes via the sensor (no probe)
+WSR3="$DTMP/ws-rate-resume"; mkdir -p "$WSR3"
+(cd "$WSR3" && AR_NO_DAEMON=1 bash "$PLUGIN/scripts/task-resume-at.sh" auto critical >/dev/null)
+ar_task_set "$WSR3" limit_seen 1; ar_task_set "$WSR3" limit_seen_at "$(date +%s)"
+mkrate 5
+printf 'clean' > "$MODEFILE"
+bash "$PLUGIN/scripts/daemon.sh" "$WSR3" & DPR=$!; WR=0
+while kill -0 "$DPR" 2>/dev/null && [ "$WR" -lt 15 ]; do sleep 1; WR=$((WR + 1)); done
+kill "$DPR" 2>/dev/null; wait "$DPR" 2>/dev/null
+t_eq "rate: resumes when usage falls after a seen limit" "done" "$(ar_task_get "$WSR3" status)"
+
+# absent rate.json -> the probe path still runs (no regression)
+rm -f "$CLAUDE_AUTO_RESUME_RATE_FILE"
+WSR4="$DTMP/ws-rate-absent"; mkdir -p "$WSR4"
+printf 'clean' > "$MODEFILE"
+(cd "$WSR4" && AR_NO_DAEMON=1 bash "$PLUGIN/scripts/task-resume-at.sh" auto critical >/dev/null)
+AR_DAEMON_ONESHOT=1 bash "$PLUGIN/scripts/daemon.sh" "$WSR4"
+t_contains "rate: absent rate.json falls back to probe wording" "will resume after you hit a limit" \
+  "$(ar_journal_show "$WSR4" 3)"
+
+# setup-statusline chains an existing status line and restores it on remove
+SLT="$DTMP/sl-settings.json"
+printf '{ "statusLine": { "type": "command", "command": "echo ORIG" }, "model": "x" }\n' > "$SLT"
+CLAUDE_SETTINGS_FILE="$SLT" bash "$PLUGIN/scripts/setup-statusline.sh" install >/dev/null
+t_contains "setup-statusline: registers our sensor" "statusline.sh" "$(cat "$SLT")"
+t_contains "setup-statusline: chains the original command" "echo ORIG" "$(cat "$DTMP/statusline-chain")"
+CLAUDE_SETTINGS_FILE="$SLT" bash "$PLUGIN/scripts/setup-statusline.sh" remove >/dev/null
+t_contains "setup-statusline: restores the original on remove" "echo ORIG" "$(cat "$SLT")"
+t_contains "setup-statusline: preserves unrelated keys" '"model"' "$(cat "$SLT")"
+
+# back to the isolated (absent) default for the remaining probe-path tests
+rm -f "$DTMP/rate-sensor.json"
+export CLAUDE_AUTO_RESUME_RATE_FILE="$DTMP/rate.json"
 
 # auto mode: gives up when limit never lifts within the window
 WS9="$DTMP/ws-auto-giveup"; mkdir -p "$WS9"

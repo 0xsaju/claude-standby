@@ -30,6 +30,11 @@ const CONFIG_TEMPLATE = `# claude-auto-resume configuration (shell syntax, AR_CF
 #
 # Model used for auto-mode limit probes (default: haiku):
 #AR_CFG_PROBE_MODEL="haiku"
+#
+# Path to an existing rate-limit cache to read the exact reset time from
+# (e.g. a status line that caches it). Zero setup — point us at your file.
+# Fields: used_percentage|rate_pct + resets_at (epoch or ISO):
+#AR_CFG_RATE_SOURCE="/tmp/claude_rate_cache_$USER.json"
 `;
 
 let statusItem;
@@ -82,6 +87,35 @@ function readAllTasks() {
 function readTask() {
   const ws = workspacePath();
   return ws ? readAllTasks()[ws] : undefined;
+}
+
+// The exact 5-hour reset time, read from whatever rate snapshot exists —
+// our sensor's rate.json or a status-line cache already on disk (mirrors
+// ar_rate_file in lib.sh). Returns { resetsAt(epoch), usedPct, source } or
+// null. Zero setup: if a file with the time is there, we just read it.
+function readRate() {
+  const user = process.env.USER || (os.userInfo && os.userInfo().username) || '';
+  const candidates = [
+    path.join(AR_HOME, 'rate.json'),
+    `/tmp/claude_rate_cache_${user}.json`,
+  ];
+  for (const f of candidates) {
+    try {
+      const d = JSON.parse(fs.readFileSync(f, 'utf8'));
+      const raw = d.resets_at;
+      let epoch = null;
+      if (typeof raw === 'number') epoch = raw;
+      else if (/^\d+$/.test(String(raw))) epoch = parseInt(raw, 10);
+      else if (typeof raw === 'string' && raw.includes('T'))
+        epoch = Math.floor(Date.parse(raw) / 1000);
+      if (!epoch || epoch * 1000 <= Date.now()) continue; // absent/stale
+      const used = d.used_percentage != null ? d.used_percentage : d.rate_pct;
+      return { resetsAt: epoch, usedPct: used != null ? used : null, source: path.basename(f) };
+    } catch {
+      /* try next candidate */
+    }
+  }
+  return null;
 }
 
 // A resume is only genuinely in flight while the daemon that started it is
@@ -354,6 +388,7 @@ function collectState() {
     claudeFound,
     stateHealthy,
     stateStatus,
+    rate: readRate(),
     ready: cliFoundCache.value && hooksOk,
   };
 }

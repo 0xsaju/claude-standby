@@ -16,6 +16,9 @@
 AR_STATE_FILE="${CLAUDE_AUTO_RESUME_STATE:-$HOME/.claude/auto-resume/state.json}"
 AR_HOME="$(dirname "$AR_STATE_FILE")"
 AR_LOG_DIR="${CLAUDE_AUTO_RESUME_LOG_DIR:-$AR_HOME/logs}"
+# Rate-limit snapshot written by the status-line sensor (HOOK-FINDINGS F4):
+# { captured_at, resets_at (epoch), used_percentage }.
+AR_RATE_FILE="${CLAUDE_AUTO_RESUME_RATE_FILE:-$AR_HOME/rate.json}"
 
 # Optional user config (shell syntax, AR_CFG_* variables only — see
 # docs/USER-GUIDE.md). Environment variables always win over config values
@@ -630,6 +633,86 @@ ar_session_latest() {
 ar_daemon_pidfile() {
   # $1: workspace -> the pidfile path its daemon uses (D11)
   printf '%s/daemons/%s.pid\n' "$AR_HOME" "$(printf '%s' "$1" | cksum | awk '{print $1}')"
+}
+
+# ------------------------------------------- rate-limit snapshot (F4) --
+# rate.json is written by the status-line sensor (plugin/scripts/statusline.sh)
+# and holds only JSON numbers, so the text tier is a simple number grep.
+
+ar_rate_file() {
+  # Resolve WHICH rate snapshot to read, in priority order. The point: if a
+  # file with the reset time already exists (e.g. a status line that caches
+  # it), just read it — no sensor, no setup. The sensor is only the fallback
+  # that PRODUCES this file for users who have none.
+  #   1. explicit override (tests / config)
+  #   2. our sensor's output, if registered
+  #   3. a common status-line cache already on disk (read-only)
+  local common
+  if [ -n "${CLAUDE_AUTO_RESUME_RATE_FILE:-}" ]; then printf '%s\n' "$CLAUDE_AUTO_RESUME_RATE_FILE"; return 0; fi
+  if [ -n "${AR_CFG_RATE_SOURCE:-}" ] && [ -f "$AR_CFG_RATE_SOURCE" ]; then printf '%s\n' "$AR_CFG_RATE_SOURCE"; return 0; fi
+  if [ -f "$AR_HOME/rate.json" ]; then printf '%s\n' "$AR_HOME/rate.json"; return 0; fi
+  common="/tmp/claude_rate_cache_${USER:-$(id -un 2>/dev/null)}.json"
+  if [ -f "$common" ]; then printf '%s\n' "$common"; return 0; fi
+  printf '%s\n' "$AR_HOME/rate.json"   # default (may not exist yet)
+}
+
+ar_rate_get() {
+  # $1: field -> value ("" if absent). used_percentage falls back to the
+  # `rate_pct` field name that some status-line caches use.
+  local f rf
+  rf="$(ar_rate_file)"
+  [ -f "$rf" ] || return 0
+  local eng
+  eng="$(ar_json_engine)"
+  case "$1" in
+    used_percentage)
+      case "$eng" in
+        jq) jq -r '.used_percentage // .rate_pct // "" | tostring' "$rf" 2>/dev/null ;;
+        python3) python3 -c 'import sys,json
+try:
+    d=json.load(open(sys.argv[1])); v=d.get("used_percentage", d.get("rate_pct",""))
+    print("" if v=="" else v)
+except Exception: pass' "$rf" 2>/dev/null ;;
+        *) grep -oE "\"(used_percentage|rate_pct)\"[[:space:]]*:[[:space:]]*[0-9.]+" "$rf" 2>/dev/null | head -1 | sed 's/.*:[[:space:]]*//' ;;
+      esac ;;
+    resets_at)
+      # Normalize to epoch so an external cache storing an ISO timestamp
+      # still works (our sensor already writes epoch).
+      local raw
+      case "$eng" in
+        jq) raw="$(jq -r '.resets_at // "" | tostring' "$rf" 2>/dev/null)" ;;
+        python3) raw="$(python3 -c 'import sys,json
+try:
+    d=json.load(open(sys.argv[1])); v=d.get("resets_at","")
+    print("" if v=="" else v)
+except Exception: pass' "$rf" 2>/dev/null)" ;;
+        *) raw="$(grep -oE "\"resets_at\"[[:space:]]*:[[:space:]]*\"?[0-9T:+Z.-]+\"?" "$rf" 2>/dev/null | head -1 | sed -E 's/^"resets_at"[[:space:]]*:[[:space:]]*"?//; s/"$//')" ;;
+      esac
+      case "$raw" in
+        *T*) ar_iso_to_epoch "$raw" 2>/dev/null || true ;;
+        *)   printf '%s' "$raw" | grep -oE '^[0-9]+' ;;
+      esac ;;
+    *)
+      case "$eng" in
+        jq) jq -r --arg f "$1" '.[$f] // "" | tostring' "$rf" 2>/dev/null ;;
+        python3) python3 -c 'import sys,json
+try:
+    d=json.load(open(sys.argv[1])); v=d.get(sys.argv[2],"")
+    print("" if v=="" else v)
+except Exception: pass' "$rf" "$1" 2>/dev/null ;;
+        *) grep -oE "\"$1\"[[:space:]]*:[[:space:]]*[0-9.]+" "$rf" 2>/dev/null | head -1 | sed 's/.*:[[:space:]]*//' ;;
+      esac ;;
+  esac
+}
+
+ar_rate_usable() {
+  # 0 (true) when the resolved snapshot carries a resets_at still in the
+  # future — the reset time is absolute, so it stays valid regardless of age.
+  local r now
+  r="$(ar_rate_get resets_at)"
+  printf '%s' "$r" | grep -Eq '^[0-9]+$' || return 1
+  now="$(date +%s)"
+  [ "$r" -gt "$now" ]
 }
 
 ar_task_list() {

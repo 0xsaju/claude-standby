@@ -24,6 +24,8 @@
 #   claude-auto-resume doctor                       check the environment
 #   claude-auto-resume setup-hooks [--force]        register detection hooks in settings.json
 #   claude-auto-resume remove-hooks                 remove those hooks
+#   claude-auto-resume setup-statusline             capture the exact reset time (F4, opt-in)
+#   claude-auto-resume remove-statusline            remove the status-line sensor
 #   claude-auto-resume update                       update to the latest version
 #   claude-auto-resume uninstall [--yes]            remove the tool
 #   claude-auto-resume version                      print the version
@@ -155,6 +157,12 @@ EOF
     else
       printf '  %-8s %-5s %s\n' "hooks" "--" "not registered (claude-auto-resume setup-hooks); manual mode still works"
     fi
+    if ar_rate_usable; then
+      RSRC="$(ar_rate_file)"; RESET_E="$(ar_rate_get resets_at)"; USED_P="$(ar_rate_get used_percentage)"
+      printf '  %-8s %-5s %s\n' "reset" "ok" "$(ar_epoch_to_iso "$RESET_E") (${USED_P:-?}% used) — via $(basename "$RSRC")"
+    else
+      printf '  %-8s %-5s %s\n' "reset" "--" "no local reset time; auto-detect will probe (see: setup-statusline, or AR_CFG_RATE_SOURCE)"
+    fi
     if command -v osascript >/dev/null 2>&1; then
       printf '  %-8s %-5s %s\n' "notify" "ok" "osascript"
     elif command -v notify-send >/dev/null 2>&1; then
@@ -169,6 +177,12 @@ EOF
 
   remove-hooks)
     exec bash "$SCRIPTS_DIR/setup-hooks.sh" remove ;;
+
+  setup-statusline)
+    exec bash "$SCRIPTS_DIR/setup-statusline.sh" install ;;
+
+  remove-statusline)
+    exec bash "$SCRIPTS_DIR/setup-statusline.sh" remove ;;
 
   update)
     if [ -d "$ROOT/.git" ] && command -v git >/dev/null 2>&1; then
@@ -203,6 +217,7 @@ EOF
       case "$ANS" in y|Y|yes|YES) ;; *) echo "Aborted."; exit 0 ;; esac
     fi
     bash "$SCRIPTS_DIR/setup-hooks.sh" remove 2>/dev/null | grep -v "nothing to remove" || true
+    bash "$SCRIPTS_DIR/setup-statusline.sh" remove 2>/dev/null | grep -v "nothing to remove" || true
     [ -L "$ORIG0" ] && rm -f "$ORIG0"
     FOUND_LINK="$(command -v claude-auto-resume 2>/dev/null || true)"
     if [ -n "$FOUND_LINK" ] && [ -L "$FOUND_LINK" ]; then

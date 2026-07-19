@@ -92,11 +92,15 @@ session. Detailed rationale for every decision: `docs/DECISIONS.md`
       (session resume itself already works via F2 store discovery)
 - [ ] **Multiple schedules per workspace** (cockpit renders the list
       already): schema v3 (tasks get ids), per-schedule daemon + cancel.
-- [ ] **Quota-free reset inference in the engine:** the 5-hour window is
-      derivable from local transcript timestamps (verified on the F2
-      store) — move it into the daemon so auto-detect sleeps to the
-      inferred reset instead of probing, and populate a concrete time into
-      the cockpit's "When" caption. Document as HOOK-FINDINGS F4.
+- [x] **Exact reset time from local data — 2026-07-19 (D29, F4).** Claude
+      Code streams `.rate_limits.five_hour.{used_percentage,resets_at}` to
+      the status line (measured; NOT in the hook payload). The daemon now
+      reads that snapshot — from an existing status-line cache with zero
+      setup, or from our opt-in `setup-statusline` sensor — and in auto mode
+      schedules to the EXACT `resets_at` with no probe/quota (falls back to
+      probing when absent). Cockpit shows "resets 6:00 PM · 40% used".
+      **Still UNVERIFIED at a real limit:** the `used_percentage` value when
+      blocked (default `AR_LIMIT_PCT=100`), per D29.
 - [ ] **C6 — real-limit verification of `--resume`** (still open): on a
       genuine limit, with auto-detect armed and `limit_seen` set, confirm
       the daemon resumes the pinned session and the conversation continues.

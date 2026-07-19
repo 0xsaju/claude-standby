@@ -38,6 +38,13 @@ AUTO_GIVEUP="${AR_AUTO_GIVEUP_SECS:-21600}"
 # it stands down instead of probing forever and burning quota (C6). 0 = no
 # bound (probe until a limit appears or the user cancels). Default 24h.
 ARMED_MAX="${AR_ARMED_MAX_SECS:-86400}"
+# Auto mode prefers the status-line sensor's rate.json (HOOK-FINDINGS F4):
+# exact reset time, quota-free. LIMIT_PCT is the used_percentage at which we
+# treat the account as limited (UNVERIFIED at a real limit — default 100, the
+# conservative choice). RATE_CHECK is the cheap re-read cadence while armed
+# (reading a local file costs nothing, unlike a probe).
+LIMIT_PCT="${AR_LIMIT_PCT:-100}"
+RATE_CHECK="${AR_RATE_CHECK_SECS:-300}"
 CLAUDE_BIN="${CLAUDE_AUTO_RESUME_CLAUDE_BIN:-${AR_CFG_CLAUDE_BIN:-claude}}"
 EXTRA_ARGS="${CLAUDE_AUTO_RESUME_EXTRA_ARGS:-${AR_CFG_EXTRA_ARGS:-}}"
 
@@ -163,6 +170,60 @@ while :; do
         stand_down "auto give-up window exceeded"
       fi
     fi
+
+    # --- rate-sensor fast path (HOOK-FINDINGS F4) ------------------------
+    # When the status-line sensor has captured a future reset time into
+    # rate.json, use it: detection (used_percentage) and the EXACT reset
+    # time come from local data — no probe, no quota. We fall through to the
+    # probe path only when rate.json is absent or stale.
+    RATE_RESUME=""
+    if ar_rate_usable; then
+      USED="$(ar_rate_get used_percentage)"; USED="${USED%%.*}"; USED="${USED:-0}"
+      RESETS_AT="$(ar_rate_get resets_at)"
+      RESET_ISO="$(ar_epoch_to_iso "$RESETS_AT")"
+      if [ "$USED" -ge "$LIMIT_PCT" ]; then
+        # Limited per the sensor. Record it, then wait for the EXACT reset.
+        if [ "$LIMIT_SEEN" != "1" ]; then
+          ar_task_set "$WS" limit_seen 1
+          ar_task_set "$WS" limit_seen_at "$NOW"
+          ar_journal_append "$WS" "limit-hit" "sensor: ${USED}% used — waiting for reset $RESET_ISO"
+        fi
+        if [ "$NOW" -lt "$RESETS_AT" ]; then
+          ar_task_set "$WS" resume_at "$RESET_ISO"
+          ar_log "daemon[$$]: sensor limited (${USED}%); exact reset $RESET_ISO"
+          [ -n "${AR_DAEMON_ONESHOT:-}" ] && stand_down "oneshot: sensor limited, waiting for reset"
+          continue
+        fi
+        ar_journal_append "$WS" "limit-lifted" "sensor: reset time reached"
+        RATE_RESUME=1
+      elif [ "$LIMIT_SEEN" = "1" ]; then
+        # We saw a limit and usage has since dropped below the threshold —
+        # the window reset. Resume.
+        ar_journal_append "$WS" "limit-lifted" "sensor: usage fell to ${USED}% — limit reset"
+        RATE_RESUME=1
+      else
+        # Not limited, never was: armed. No probe, no quota. Re-read the
+        # sensor cheaply on a short cadence; bound the armed window (C6).
+        ARMED_SINCE="$(ar_task_get "$WS" armed_since)"
+        if [ -z "$ARMED_SINCE" ]; then ARMED_SINCE="$NOW"; ar_task_set "$WS" armed_since "$NOW"; fi
+        if [ "$ARMED_MAX" -gt 0 ] && [ $((NOW - ARMED_SINCE)) -ge "$ARMED_MAX" ]; then
+          ar_task_set "$WS" status failed
+          ar_journal_append "$WS" "failed" "armed ${ARMED_MAX}s with no limit — stood down; reschedule when you expect one"
+          ar_notify "Auto-resume stood down" "No limit hit in $((ARMED_MAX / 3600))h for $WS. Reschedule when you expect to hit one."
+          stand_down "armed window exceeded (sensor)"
+        fi
+        ar_task_set "$WS" resume_at "$(ar_epoch_to_iso $((NOW + RATE_CHECK)) )"
+        if [ "$(ar_task_get "$WS" armed_noted)" != "1" ]; then
+          ar_task_set "$WS" armed_noted 1
+          ar_journal_append "$WS" "armed" "not limited (${USED}% used) — will resume when you hit the limit; reset at $RESET_ISO"
+        fi
+        ar_log "daemon[$$]: armed via sensor (${USED}% used); reset $RESET_ISO"
+        [ -n "${AR_DAEMON_ONESHOT:-}" ] && stand_down "oneshot: armed via sensor"
+        continue
+      fi
+    fi
+
+    if [ -z "$RATE_RESUME" ]; then
     if ! do_probe; then
       # Limit is active right now — record that we've seen it, so a later
       # successful probe counts as a real "lifted" and can resume.
@@ -225,6 +286,7 @@ while :; do
     fi
     ar_journal_append "$WS" "limit-lifted" "probe succeeded — limit has reset"
     ar_log "daemon[$$]: probe succeeded — proceeding to resume"
+    fi
   fi
 
   COUNT="$(ar_task_get "$WS" resume_count)"

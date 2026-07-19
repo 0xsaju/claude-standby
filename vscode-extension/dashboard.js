@@ -207,6 +207,7 @@ function stateSig(state) {
     c: state.cliFound,
     h: state.hooksVia,
     st: state.stateStatus,
+    rt: state.rate,
     d: state.daemons,
     w: state.currentWs,
     r: state.ready,
@@ -249,6 +250,24 @@ function hm12(iso) {
   const suffix = h >= 12 ? 'PM' : 'AM';
   h = h % 12 || 12;
   return `${h}:${m[2]} ${suffix}`;
+}
+
+// epoch seconds -> "6:00 PM" in local time.
+function hm12Epoch(epoch) {
+  const d = new Date(epoch * 1000);
+  let h = d.getHours();
+  const suffix = h >= 12 ? 'PM' : 'AM';
+  h = h % 12 || 12;
+  return `${h}:${String(d.getMinutes()).padStart(2, '0')} ${suffix}`;
+}
+
+// Honest reset caption from the rate snapshot: the window RESET time — not a
+// promise to resume then (that only happens if you actually hit the limit).
+function resetInfo(state) {
+  const r = state.rate;
+  if (!r || !r.resetsAt) return null;
+  const pct = r.usedPct != null ? ` · ${r.usedPct}% used` : '';
+  return { time: hm12Epoch(r.resetsAt), pct, label: `resets ${hm12Epoch(r.resetsAt)}${pct}` };
 }
 
 function sessionTitle(state, ws, id) {
@@ -357,6 +376,10 @@ function composerCard(idPrefix, ws, state, primary) {
   const task = ws ? state.tasks[ws] : undefined;
   const promptVal =
     task && task.resume_prompt_template ? task.resume_prompt_template : DEFAULT_PROMPT;
+  const ri = resetInfo(state);
+  const autoHint = ri
+    ? `your 5-hour window resets <b>${esc(ri.time)}</b>${esc(ri.pct)} — if you hit the limit, auto-detect resumes exactly then (no polling)`
+    : "auto-detect checks periodically until the limit lifts, then resumes — it doesn't know your reset time in advance";
   return `<div class="composer card" data-ws="${esc(ws || '')}" data-pinned="${esc(pinned || '')}" id="${idPrefix}">
     <div class="field">
       <label>Conversation</label>
@@ -386,7 +409,7 @@ function composerCard(idPrefix, ws, state, primary) {
           <button class="seg on" data-ap="PM">PM</button>
         </span>
       </div>
-      <div class="when-hint dim">auto-detect checks every ~30 min with a tiny probe until the limit lifts, then resumes — it doesn't know your reset time in advance</div>
+      <div class="when-hint dim">${autoHint}</div>
     </div>
     <div class="c-actions">
       <label class="imp-lbl dim">On reset</label>
@@ -420,11 +443,21 @@ function scheduledList(state, ws) {
   const title =
     sessionTitle(state, ws, task.session_id) ||
     (task.session_id ? task.session_id.slice(0, 8) : 'new chat');
+  // For an auto task we know the exact window reset (from rate.json): show it.
+  // Armed (no limit seen yet) => "armed · resets 6:00 PM" (it won't resume at
+  // that reset unless a limit is actually hit). Limited => "resumes 6:00 PM".
+  const ri = resetInfo(state);
+  const autoLabel =
+    auto && ri
+      ? task.limit_seen === '1' || task.limit_seen === 1
+        ? `resumes ${ri.time}`
+        : `armed · resets ${ri.time}`
+      : 'auto-detect';
   const whenLabel = stuck
     ? 'resume interrupted — reschedule'
     : task.status === 'waiting'
       ? auto
-        ? 'auto-detect'
+        ? autoLabel
         : `resumes ${hm12(task.resume_at)}`
       : (STATUS_LABEL[task.status] || task.status).toLowerCase();
   const promptKind =
