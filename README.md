@@ -12,6 +12,8 @@ session with context, and never makes you babysit a terminal again.
 ![Version](https://img.shields.io/badge/version-0.6.0-informational)
 ![Tests](https://img.shields.io/badge/tests-236%20passing-brightgreen)
 ![Status](https://img.shields.io/badge/status-alpha-orange)
+[![VS Marketplace](https://img.shields.io/visual-studio-marketplace/v/0xsaju.claude-auto-resume-cockpit?label=VS%20Marketplace&color=0066b8)](https://marketplace.visualstudio.com/items?itemName=0xsaju.claude-auto-resume-cockpit)
+[![Open VSX](https://img.shields.io/open-vsx/v/0xsaju/claude-auto-resume-cockpit?label=Open%20VSX&color=a60ee5)](https://open-vsx.org/extension/0xsaju/claude-auto-resume-cockpit)
 
 [Install](#installation) · [Quick start](#quick-start) ·
 [Commands](#commands) · [How it works](#how-it-works) ·
@@ -84,6 +86,18 @@ claude-auto-resume uninstall    # remove cleanly (keeps your task state)
 
 > **Windows**: best-effort via WSL/Git Bash for now; native support
 > (Task Scheduler) is on the roadmap.
+
+### The cockpit (optional GUI)
+
+A thin VS Code / Cursor panel over the same CLI — status bar, one-click
+scheduling, and a dashboard. Install from your editor's Extensions view
+(search **"Claude Auto-Resume"**), or directly:
+
+- **VS Code** → **[Marketplace](https://marketplace.visualstudio.com/items?itemName=0xsaju.claude-auto-resume-cockpit)**
+- **Cursor / Windsurf / VSCodium** → **[Open VSX](https://open-vsx.org/extension/0xsaju/claude-auto-resume-cockpit)**
+
+On first run it offers to install the CLI above for you. The cockpit drives
+the CLI; it never spawns or parses Claude Code itself.
 
 ## Quick start
 
@@ -203,7 +217,7 @@ caps we can't beat, the docs say so plainly.
 | Task tracking, journal, multi-workspace `list` | ✅ |
 | One-command install | ✅ |
 | Full CLI tool surface (update/uninstall/doctor/…) | ✅ |
-| VS Code cockpit | 🧪 MVP + published |
+| VS Code / Cursor cockpit | ✅ published (VS Marketplace + Open VSX) |
 | `/warmup` window scheduler · stuck detection · resume verification | 🕐 Planned |
 | Native Windows (Task Scheduler) · reboot-surviving schedules | 🕐 Planned |
 
