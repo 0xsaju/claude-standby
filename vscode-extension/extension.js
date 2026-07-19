@@ -381,7 +381,7 @@ function refreshStatusBar() {
   const map = {
     waiting: [
       '$(sync)',
-      auto ? `auto${at ? ` · reset ~${at}` : ''}` : `waiting · resumes ${at}`,
+      auto ? `auto-detect${at ? ` · next check ${at}` : ''}` : `waiting · resumes ${at}`,
     ],
     resuming: ['$(sync~spin)', 'resuming…'],
     running: ['$(play)', 'tracked'],
@@ -423,7 +423,9 @@ function statusTooltip(task) {
   if (task.status === 'waiting' && task.resume_at) {
     const auto = task.resume_mode === 'auto';
     md.appendMarkdown(
-      `Resumes at **${clockAmPm(task.resume_at)}**${auto ? ' · auto-detect' : ''}\n\n`
+      auto
+        ? `Auto-detecting the reset · next check **${clockAmPm(task.resume_at)}**\n\n`
+        : `Resumes at **${clockAmPm(task.resume_at)}**\n\n`
     );
   }
   if (task.session_id) {

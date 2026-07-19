@@ -87,7 +87,7 @@ function attach(webview, host) {
         await host.cancel(msg.ws);
         break;
       case 'refresh':
-        update(host);
+        update(host, true);
         break;
       case 'openLog':
         host.openLog();
@@ -138,8 +138,11 @@ function createOrShow(context, host) {
   attach(panel.webview, host);
   panel.onDidDispose(() => {
     panel = undefined;
+    _lastSig = null;
   });
-  panel.webview.html = render(host.collectState());
+  const state0 = host.collectState();
+  _lastSig = stateSig(state0);
+  panel.webview.html = render(state0);
   return panel;
 }
 
@@ -186,8 +189,35 @@ function resolveSidebar(webviewView, host) {
   openFull();
 }
 
-function update(host) {
-  if (panel) panel.webview.html = render(host.collectState());
+// Signature of everything the page renders from (state + view flags).
+// Used to skip the periodic re-render when nothing changed — otherwise
+// the 5 s poll would rebuild the HTML and wipe whatever the user is
+// typing in the composer (prompt, time, session pick).
+let _lastSig = null;
+function stateSig(state) {
+  return JSON.stringify({
+    t: state.tasks,
+    s: state.sessionsByWs,
+    p: state.projects,
+    c: state.cliFound,
+    h: state.hooksVia,
+    d: state.daemons,
+    w: state.currentWs,
+    r: state.ready,
+    a: state.author,
+    v: _view,
+    o: _otherWs,
+    x: _cliOpen,
+  });
+}
+
+function update(host, force) {
+  if (!panel) return;
+  const state = host.collectState();
+  const sig = stateSig(state);
+  if (!force && sig === _lastSig) return; // nothing changed — don't clobber input
+  _lastSig = sig;
+  panel.webview.html = render(state);
 }
 
 // ------------------------------------------------------------- helpers ----
@@ -716,6 +746,7 @@ function render(state) {
   .chip:hover { border-color: var(--vscode-descriptionForeground); }
   .chip.selected { border-color: #F59E0B; color: #F59E0B; background: rgba(245,158,11,.10); }
   .when-sep { width: 1px; height: 18px; background: var(--vscode-widget-border, rgba(128,128,128,.35)); margin: 0 4px; }
+  .when-row.chip-active .t-hour, .when-row.chip-active .t-min, .when-row.chip-active .ampm { opacity: .4; }
   .t-hour, .t-min { width: 34px; text-align: center; padding: 5px 0; font-variant-numeric: tabular-nums; }
   .ampm { display: inline-flex; border: 1px solid var(--vscode-input-border, var(--vscode-widget-border, rgba(128,128,128,.35))); border-radius: 3px; overflow: hidden; }
   .seg { font-size: 12px; padding: 5px 9px; border: none; background: var(--vscode-input-background); color: var(--vscode-descriptionForeground); }
@@ -858,6 +889,7 @@ ${body}
   function wireComposer(comp) {
     fillSessions(comp);
     const chips = $$('.chip', comp);
+    const whenRow = $('.when-row', comp);
     const hour = $('.t-hour', comp);
     const min = $('.t-min', comp);
     const segs = $$('.seg', comp);
@@ -867,15 +899,24 @@ ${body}
 
     const selectChip = (c) => {
       chips.forEach((x) => x.classList.toggle('selected', x === c));
+      if (whenRow) whenRow.classList.add('chip-active'); // dim the time fields
       if (hint) hint.style.display = (c && c.dataset.when === 'auto') ? '' : 'none';
     };
-    const clearChips = () => { chips.forEach((x) => x.classList.remove('selected')); if (hint) hint.style.display = 'none'; };
+    const clearChips = () => {
+      chips.forEach((x) => x.classList.remove('selected'));
+      if (whenRow) whenRow.classList.remove('chip-active');
+      if (hint) hint.style.display = 'none';
+    };
     chips.forEach((c) => c.addEventListener('click', () => selectChip(c)));
     [hour, min].forEach((el) => el && el.addEventListener('focus', clearChips));
     segs.forEach((s) => s.addEventListener('click', () => {
       segs.forEach((x) => x.classList.toggle('on', x === s));
       clearChips();
     }));
+    // initial state: a chip is preselected server-side, so reflect it.
+    const sel0 = $('.chip.selected', comp);
+    if (sel0 && whenRow) whenRow.classList.add('chip-active');
+    if (hint) hint.style.display = (sel0 && sel0.dataset.when === 'auto') ? '' : 'none';
 
     if (prompt && resetBtn) {
       const sync = () => { resetBtn.style.display = (prompt.value.trim() !== DEFAULT_PROMPT) ? '' : 'none'; };
