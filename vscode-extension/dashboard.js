@@ -102,9 +102,6 @@ function attach(webview, host) {
       case 'install':
         host.installCli();
         break;
-      case 'setupHooks':
-        host.setupHooks();
-        break;
       case 'goSetup':
         _view = 'setup';
         update(host);
@@ -205,7 +202,6 @@ function stateSig(state) {
     p: state.projects,
     k: state.stuckWs,
     c: state.cliFound,
-    h: state.hooksVia,
     st: state.stateStatus,
     rt: state.rate,
     d: state.daemons,
@@ -296,9 +292,7 @@ function setupRow(ok, title, mono, action, pending, pendingLabel) {
     glyphCls = 'c-red';
     glyph = CROSS;
     status = action
-      ? `<button class="btn-pri" data-act="${esc(action)}">${
-          action === 'install' ? 'Install' : 'Register'
-        }</button>`
+      ? `<button class="btn-pri" data-act="${esc(action)}">Install</button>`
       : `<span class="dim ck-lab">checking…</span>`;
   }
   return `<div class="ck-row">
@@ -312,12 +306,11 @@ function setupRow(ok, title, mono, action, pending, pendingLabel) {
 
 function setupScreen(state) {
   const cliOk = state.cliFound;
-  const hooksOk = state.hooksVia !== null;
   const claudeOk = state.claudeFound;
   const stateStatus = state.stateStatus || (state.stateHealthy ? 'ok' : 'absent');
   const stateOk = stateStatus === 'ok';
   const statePending = stateStatus === 'absent';
-  const ready = cliOk && hooksOk;
+  const ready = cliOk;
   return `<div class="scr scr-setup">
     <div class="brandline">
       ${BRAND_SVG}
@@ -331,7 +324,7 @@ function setupScreen(state) {
     <div class="steps">
       <div class="step">
         <div class="step-hd"><span class="step-n">1</span> You hit a usage limit</div>
-        <div class="dim step-cap">Claude Code pauses mid-task; the hook records it.</div>
+        <div class="dim step-cap">Claude Code pauses your task. You schedule a resume with one command (or from here).</div>
       </div>
       <div class="step">
         <div class="step-hd"><span class="step-n">2</span> The tool waits for the reset</div>
@@ -346,7 +339,6 @@ function setupScreen(state) {
     <h3 class="section-title">Setup checklist</h3>
     <div class="checklist">
       ${setupRow(cliOk, 'Terminal CLI installed', 'claude-auto-resume', cliOk ? 'installed' : 'install')}
-      ${setupRow(hooksOk, 'Hooks registered', '~/.claude/settings.json', hooksOk ? `via ${state.hooksVia}` : 'register')}
       ${setupRow(claudeOk, 'Claude Code detected', '~/.claude', claudeOk ? 'found' : '')}
       ${setupRow(stateOk, 'State file', '~/.claude/auto-resume/state.json', stateOk ? 'healthy' : '', statePending, 'created on first schedule')}
     </div>
@@ -355,15 +347,11 @@ function setupScreen(state) {
       ready
         ? `<div class="ready-row">
             <span class="c-green">${CHECK}</span>
-            <span><b>Ready.</b> <span class="dim">Everything is wired.</span></span>
+            <span><b>Ready.</b> <span class="dim">The terminal tool is installed.</span></span>
             <span class="spacer"></span>
             <button class="go" id="go-dashboard">Open dashboard →</button>
           </div>`
-        : `<p class="dim mixed-note">${
-            cliOk
-              ? 'One step left — hooks let the tool notice the moment a limit hits.'
-              : 'Install the terminal tool to get started — it does all the work.'
-          }</p>
+        : `<p class="dim mixed-note">Install the terminal tool to get started — it does all the work.</p>
           <p class="skip-line"><a id="go-dashboard">Skip to dashboard →</a></p>`
     }
   </div>`;
@@ -570,7 +558,7 @@ function cliReference() {
     ['claude-auto-resume sessions', 'list conversations in this project'],
     ['claude-auto-resume status', "what's scheduled, everywhere"],
     ['claude-auto-resume cancel', 'cancel a scheduled resume'],
-    ['claude-auto-resume doctor', 'check CLI, hooks, daemon health'],
+    ['claude-auto-resume doctor', 'check CLI, daemon, and reset detection'],
     ['claude-auto-resume log', 'tail the journal'],
   ];
   const grid = cmds
@@ -616,8 +604,7 @@ function aboutRow(state) {
 function dashboardScreen(state) {
   const ws = state.currentWs;
   const task = ws ? state.tasks[ws] : undefined;
-  const hooksOk = state.hooksVia !== null;
-  const healthOk = state.cliFound && hooksOk;
+  const healthOk = state.cliFound;
 
   const current = ws
     ? `<div class="ws-head">
@@ -641,9 +628,7 @@ function dashboardScreen(state) {
       <span class="name">Claude Auto-Resume</span>
       <span class="dim ver">v${esc(state.extVersion || '')}</span>
       <span class="spacer"></span>
-      <span class="health" title="CLI ${state.cliFound ? 'found' : 'missing'} · hooks ${
-        hooksOk ? `via ${state.hooksVia}` : 'not set up'
-      } · ${state.daemons} daemon(s)">
+      <span class="health" title="CLI ${state.cliFound ? 'found' : 'missing'} · ${state.daemons} daemon(s)">
         <span class="dot bg-${healthOk ? 'green' : 'orange'}"></span>${
     healthOk ? 'healthy' : 'setup needed'
   }</span>
@@ -911,7 +896,6 @@ ${body}
   $$('[data-act]').forEach((b) => b.addEventListener('click', () => {
     const a = b.dataset.act;
     if (a === 'install') send('install');
-    else if (a === 'register') send('setupHooks');
   }));
 
   // CLI reference open/close is persisted host-side so the 5s refresh

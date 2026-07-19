@@ -53,10 +53,10 @@ later via a "Setup" link. Two parts:
    - Terminal CLI installed (`claude-auto-resume`) — states: checking
      (subtle spinner) / ✓ installed v0.3.0 (green) / ✗ missing + **Install**
      button (runs installer in a terminal)
-   - Hooks registered in `~/.claude/settings.json` — ✓ / ✗ + **Register**
    - Claude Code CLI found — ✓ v2.1.x / ✗ + doc link
    - State file healthy — ✓ `~/.claude/auto-resume/state.json`
-   When every row is green: a success row "**Ready.** Everything is wired."
+   When the CLI is present: a success row "**Ready.** The terminal tool is
+   installed."
    plus a primary button **Open dashboard →**. Design both the mixed state
    (one ✗) and the all-green state.
 
@@ -147,10 +147,9 @@ Per task: status (waiting · resuming · running · limit-hit · done · failed
 resume_mode (`at` | `auto`), resume_count/max_resumes, custom prompt,
 journal events. Global: current workspace path, all projects (name+path),
 per-project recent sessions (id, title/first-prompt summary, age, size),
-health booleans (CLI, hooks, daemons), version, and the **inferred limit
-reset time** for auto-detect (computed locally from the user's activity —
-no quota spent). Countdown ticks every second — tabular numerals, no
-layout shift.
+health booleans (CLI, daemons), version, and the **exact limit reset time**
+for auto-detect (read from the local rate snapshot — F4, no quota spent).
+Countdown ticks every second — tabular numerals, no layout shift.
 
 ## 5. Component consistency rules
 

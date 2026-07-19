@@ -1,26 +1,31 @@
 # claude-auto-resume — guardrails
 
 Tool that lets Claude Code tasks survive rate-limit hits: detect the limit,
-wait until reset, auto-resume the session. Engine = Claude Code plugin
-(`plugin/`), cockpit = future VS Code extension (`vscode-extension/`),
-contract = `~/.claude/auto-resume/state.json`.
+wait until reset, auto-resume the session. Engine = portable scripts
+(`plugin/scripts/`), cockpit = VS Code extension (`vscode-extension/`),
+contract = `~/.claude/auto-resume/state.json`. The Claude Code Stop-hook
+path was removed 2026-07-19 (D31): detection reads local data, not hooks.
 
 ## Hard constraints — do not violate
 
-- **C1 — No invented payload shapes.** Detection logic may only match
-  payloads/transcript formats documented in `docs/HOOK-FINDINGS.md`. Until
-  that file has real probe data, detection stays a stub with TODO(C1)
-  markers. `plugin/scripts/on-stop.sh` is designed so only its trigger
-  changes if hooks turn out not to fire (supervisor-wrapper fallback).
+- **C1 — No invented data shapes.** Detection logic may only match formats
+  MEASURED and documented in `docs/HOOK-FINDINGS.md`: F1 (the limit
+  MESSAGE the probe reads), F2 (the session store for `--resume` ids), F4
+  (the status-line rate stream: `used_percentage` + `resets_at`). No
+  guessed payloads. Auto-detect = read a rate snapshot (F4) if present,
+  else one `haiku` probe that trusts the F1 message — never the exit code.
 - **C2 — Portable bash.** POSIX-compatible bash, no hard `jq` dependency
   (fallback chain: jq → python3 → awk/sed on canonical layout), no GNU-only
   flags without a BSD alternative. Target Linux + macOS; Windows best-effort.
-- **C3 — Plugin layout.** Manifest only in `plugin/.claude-plugin/`;
-  `hooks/`, `scripts/` at plugin root; hook command paths use
-  `${CLAUDE_PLUGIN_ROOT}`. The plugin is a hook sensor only — no slash
-  commands (D17); the CLI (`bin/claude-auto-resume`) is the interface.
-- **C4 — Hooks never break the host.** Every hook script always `exit 0`,
-  finishes fast (< 2s typical), logs to its own log, never stderr noise.
+- **C3 — Engine layout.** The engine is plain scripts under
+  `plugin/scripts/` (the `plugin/.claude-plugin/plugin.json` manifest is
+  vestigial — no hooks, no slash commands). The CLI
+  (`bin/claude-auto-resume`) is the only interface (D17). No slash commands
+  (they cost tokens and can't run while limited).
+- **C4 — Sensors never break the host.** The status-line sensor
+  (`statusline.sh`) always `exit 0`, finishes fast, chains (never clobbers)
+  any existing status line, never stderr noise. It must be invisible when it
+  fails.
 - **C5 — Safety rails.** `max_resumes` enforced; stuck detection; permission
   allowlist by default (`--dangerously-skip-permissions` only behind
   explicit opt-in); optional quiet hours.
@@ -29,28 +34,30 @@ contract = `~/.claude/auto-resume/state.json`.
 
 ## File map
 
-- `plugin/scripts/lib.sh` — state.json helpers, logging, notify, timestamps
+- `plugin/scripts/lib.sh` — state.json helpers, logging, notify, timestamps,
+  rate-snapshot readers (`ar_rate_*`)
 - `plugin/scripts/daemon.sh` — detached wait-and-resume daemon (tiers,
-  backoff, max_resumes, pidfile per workspace)
-- `plugin/scripts/on-stop.sh` — Stop/SessionEnd hook entry (detection stub)
+  backoff, max_resumes, pidfile per workspace; auto-detect via rate snapshot
+  F4 or `haiku` probe F1; reset safety grace D30)
+- `plugin/scripts/statusline.sh` — status-line rate SENSOR: captures
+  `used_percentage`/`resets_at` into `rate.json` (F4); chains any existing
+  status line; always exit 0 (C4)
+- `plugin/scripts/setup-statusline.sh` — (de)register the sensor in
+  ~/.claude/settings.json (opt-in; python3 JSON edit, backup, reversible)
 - `plugin/scripts/task-*.sh` — command backends
-  (task-resume-at.sh = manual post-limit scheduling, D10)
-- `bin/claude-auto-resume` — the CLI, primary interface (D15/D17)
-- `install.sh` — curl-pipe-bash installer; also registers hooks (D16/D20)
-- `plugin/scripts/setup-hooks.sh` — hook (de)registration in
-  ~/.claude/settings.json; canonical sensor wiring (D20)
-- `plugin/hooks/hooks.json` — same hooks as plugin packaging (alternative
-  only — never both, they'd fire twice)
+  (task-resume-at.sh = scheduling + spawns the daemon, D10)
+- `bin/claude-auto-resume` — the CLI, the only interface (D15/D17)
+- `install.sh` — curl-pipe-bash installer; links the CLI (no hooks)
 - `vscode-extension/` — cockpit MVP: plain JS, reads state.json, writes
   via CLI (D21); keep it thin, no build tooling
 - `.claude-plugin/marketplace.json` — local/GitHub install manifest
 - `test/fake-claude.sh` — claude CLI stub; `test/run-tests.sh` — test suite
 - `docs/USER-GUIDE.md` — user manual (keep in sync with behavior changes)
 - `docs/ARCHITECTURE.md` — full design; `docs/DECISIONS.md` — append-only
-  decision log; `docs/HOOK-FINDINGS.md` — probe results (source of truth
-  for detection)
-- (the standalone probe plugin was removed 2026-07-18 — on-stop.sh now
-  captures hook payloads itself; see D22)
+  decision log; `docs/HOOK-FINDINGS.md` — MEASURED formats we rely on
+  (F1 limit message, F2 session store, F4 rate stream)
+- (the Stop/SessionEnd hook path was removed 2026-07-19, D31 — detection
+  reads local data, not hooks)
 
 ## Working conventions
 

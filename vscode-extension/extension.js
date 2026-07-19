@@ -285,41 +285,6 @@ function collectState() {
       value: path.isAbsolute(cli) ? fs.existsSync(cli) : true,
     };
   }
-  let hooksVia = null;
-  try {
-    const settings = path.join(os.homedir(), '.claude', 'settings.json');
-    if (
-      fs.existsSync(settings) &&
-      fs.readFileSync(settings, 'utf8').includes('on-stop.sh')
-    ) {
-      hooksVia = 'settings';
-    } else {
-      const plugins = path.join(os.homedir(), '.claude', 'plugins');
-      if (
-        fs.existsSync(plugins) &&
-        JSON.stringify(fs.readdirSync(plugins)).includes('claude-auto-resume')
-      ) {
-        hooksVia = 'plugin';
-      } else if (fs.existsSync(plugins)) {
-        for (const sub of fs.readdirSync(plugins)) {
-          try {
-            const p = path.join(plugins, sub);
-            if (
-              fs.statSync(p).isDirectory() &&
-              JSON.stringify(fs.readdirSync(p)).includes('claude-auto-resume')
-            ) {
-              hooksVia = 'plugin';
-              break;
-            }
-          } catch {
-            /* ignore */
-          }
-        }
-      }
-    }
-  } catch {
-    /* ignore */
-  }
   let daemons = 0;
   try {
     const dir = path.join(AR_HOME, 'daemons');
@@ -357,7 +322,7 @@ function collectState() {
   // reliably from a GUI-launched editor (no login PATH), so we treat the
   // ~/.claude store as the honest signal that Claude Code is in use.
   const claudeFound = fs.existsSync(path.join(os.homedir(), '.claude'));
-  // state.json is created on first use (first schedule / hook fire), so on a
+  // state.json is created on first use (first schedule), so on a
   // brand-new install it is simply ABSENT — which is fine, not broken. Only
   // a file that exists but won't parse is a real problem. Distinguish the
   // three so the checklist doesn't greet a new user with a scary red ✗.
@@ -373,7 +338,6 @@ function collectState() {
     }
   }
   const stateHealthy = stateStatus === 'ok';
-  const hooksOk = hooksVia !== null;
   return {
     tasks: readAllTasks(),
     currentWs,
@@ -381,7 +345,6 @@ function collectState() {
     stuckWs,
     sessionsByWs,
     cliFound: cliFoundCache.value,
-    hooksVia,
     daemons,
     author,
     extVersion: EXT_VERSION,
@@ -389,7 +352,7 @@ function collectState() {
     stateHealthy,
     stateStatus,
     rate: readRate(),
-    ready: cliFoundCache.value && hooksOk,
+    ready: cliFoundCache.value,
   };
 }
 
@@ -415,7 +378,6 @@ const host = {
   openLog: () => openLog(),
   openConfig: () => openConfig(),
   installCli: () => installCli(),
-  setupHooks: () => setupHooks(),
 };
 
 // --------------------------------------------------------------- status bar --
@@ -623,17 +585,6 @@ function installCli() {
   term.sendText(INSTALL_CMD, true);
 }
 
-async function setupHooks() {
-  const res = await runCli(['setup-hooks']);
-  if (res.notFound) return offerInstall();
-  vscode.window.showInformationMessage(
-    res.code === 0
-      ? 'Detection hooks registered in ~/.claude/settings.json.'
-      : `Hook setup failed: ${res.text}`
-  );
-  refreshAll();
-}
-
 async function offerInstall() {
   const choice = await vscode.window.showInformationMessage(
     'The claude-auto-resume terminal tool is not installed.',
@@ -691,8 +642,7 @@ async function activate(context) {
     vscode.commands.registerCommand('claudeAutoResume.refreshView', refreshAll),
     vscode.commands.registerCommand('claudeAutoResume.openLog', openLog),
     vscode.commands.registerCommand('claudeAutoResume.openConfig', openConfig),
-    vscode.commands.registerCommand('claudeAutoResume.installCli', installCli),
-    vscode.commands.registerCommand('claudeAutoResume.setupHooks', setupHooks)
+    vscode.commands.registerCommand('claudeAutoResume.installCli', installCli)
   );
 
   refreshAll();

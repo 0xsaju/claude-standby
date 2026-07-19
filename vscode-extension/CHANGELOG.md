@@ -33,7 +33,7 @@ entries describe tool behavior the cockpit now surfaces.
 ## 0.8.0
 
 - **Onboarding + dashboard redesign.** First run opens a setup checklist
-  (CLI · hooks · Claude Code · state) with inline Install/Register actions;
+  (CLI · Claude Code · state) with an inline Install action;
   once green it hands off to a full-page dashboard — current-workspace
   composer with an AM/PM time picker, scheduled-resumes list with live
   countdowns, other-workspaces composer, activity timeline, collapsible CLI

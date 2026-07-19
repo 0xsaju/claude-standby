@@ -21,8 +21,7 @@ claude-auto-resume. For design internals, see
 
 ## 1. Requirements
 
-- **Claude Code** (the `claude` CLI; plugin support only needed for the
-  optional detection hooks)
+- **Claude Code** (the `claude` CLI)
 - **bash** (any modern version; the scripts avoid GNU-only and BSD-only
   constructs)
 - **macOS or Linux**. Windows via Git Bash or WSL is best-effort:
@@ -39,11 +38,10 @@ and links the CLI into `~/.local/bin`, no root needed):
 curl -fsSL https://raw.githubusercontent.com/0xsaju/claude-auto-resume/main/install.sh | bash
 ```
 
-That single command sets up everything: the CLI on your PATH **and** the
-Claude Code detection hooks (registered directly in
-`~/.claude/settings.json` — see §2.1). After that the tool manages itself:
-`claude-auto-resume update` / `uninstall` / `doctor`. (Re-running the curl
-command also updates; `... | bash -s -- --uninstall` also uninstalls.)
+That single command sets up everything: the CLI on your PATH. After that the
+tool manages itself: `claude-auto-resume update` / `uninstall` / `doctor`.
+(Re-running the curl command also updates; `... | bash -s -- --uninstall`
+also uninstalls.)
 
 Verify:
 
@@ -63,30 +61,23 @@ CLI manually:
 ln -s /path/to/claude-auto-resume/bin/claude-auto-resume ~/.local/bin/
 ```
 
-### 2.1 The detection hooks
+### 2.1 How detection works (no setup required)
 
-The CLI is the whole control surface. The **hooks** are the sensor: they
-fire when a Claude Code session stops, which is what will detect a limit
-hit the moment it happens — unattended, with the session id. (That
-detection logic is still in development; today the hooks capture the data
-that development needs.)
+The CLI is the whole control surface — the install is just the CLI on your
+PATH, nothing written to `~/.claude/settings.json`. You arm the tool for a
+task by scheduling a resume (`claude-auto-resume resume-at auto`); from then
+on a small background daemon watches for the reset and continues your
+conversation.
 
-The installer registers them automatically by writing two entries into
-`~/.claude/settings.json` — merged carefully (your existing settings and
-hooks are untouched), backed up first
-(`settings.json.car-backup-<timestamp>`), idempotent, and fully reversible:
-
-```sh
-claude-auto-resume setup-hooks    # register (the installer already did this)
-claude-auto-resume remove-hooks   # undo it surgically
-claude-auto-resume doctor         # shows whether hooks are registered
-```
-
-**Alternative packaging:** the same hooks also exist as a Claude Code
-plugin (`/plugin marketplace add ~/.claude-auto-resume`, then
-`/plugin install claude-auto-resume@auto-resume`). Use **one or the
-other** — both at once would run every hook twice, and `setup-hooks`
-detects an installed plugin and refuses for exactly that reason.
+To find the reset time, the daemon prefers your **local rate snapshot** —
+Claude Code streams your live usage and exact reset (`used_percentage`,
+`resets_at`) to its status line, and many setups already cache it on disk
+(HOOK-FINDINGS F4). When that data is present, auto-detect schedules to the
+exact reset with **zero setup and no quota**. If nothing local carries it,
+run `claude-auto-resume setup-statusline` (opt-in — see §3 and §5) to install
+a tiny sensor, or fall back to a single limit-message probe (HOOK-FINDINGS
+F1). The conversation to resume is discovered from the Claude Code session
+store (HOOK-FINDINGS F2) and pinned at schedule time.
 
 ## 3. Core concepts
 
@@ -328,15 +319,6 @@ Removes the install directory and the CLI link after confirmation
 Refuses to run on a checkout with uncommitted changes so it can't eat a
 development copy.
 
-### `claude-auto-resume setup-hooks [--force]` / `claude-auto-resume remove-hooks`
-
-Register or remove the detection hooks in `~/.claude/settings.json`.
-Merging is surgical (only entries referencing `on-stop.sh` are ever added
-or removed), a timestamped backup is written before any change, and
-running setup twice adds nothing. `--force` overrides the
-plugin-conflict check. Requires `python3` (prints the manual snippet
-otherwise).
-
 ### `claude-auto-resume setup-statusline` / `claude-auto-resume remove-statusline`
 
 Install or remove the optional status-line **sensor** that captures the
@@ -395,8 +377,7 @@ you.
 | Path | What it is |
 |---|---|
 | `~/.claude/auto-resume/state.json` | All task state. Human-readable JSON; safe to inspect, edited only via the commands. |
-| `~/.claude/auto-resume/logs/plugin.log` | Timestamped log of everything: hook firings, daemon ticks, resume attempts, errors. First stop when debugging. |
-| `~/.claude/auto-resume/logs/hook-payloads.log` | Raw hook payloads + transcript tails captured at every session stop (feeds limit-detection development). |
+| `~/.claude/auto-resume/logs/plugin.log` | Timestamped log of everything: daemon ticks, probes, resume attempts, errors. First stop when debugging. |
 | `~/.claude/auto-resume/rate.json` | Exact reset snapshot (`resets_at`, `used_percentage`) written by the optional status-line sensor; read by auto mode. Absent unless `setup-statusline` is installed (a `/tmp` cache may be used instead — see §3). |
 | `~/.claude/auto-resume/daemons/*.pid` | One pidfile per waiting workspace; auto-removed when the daemon exits. |
 | `~/.claude/auto-resume/config` | Optional configuration (see above). |
@@ -439,7 +420,7 @@ this tool does.
 **Does scheduling have to happen before the limit hits?** No — that's the
 main flow: run `claude-auto-resume resume-at` *after* the limit, and you don't even need
 to know the reset time. Pre-tracking with `claude-auto-resume start` just adds
-bookkeeping and (soon) hook-based instant detection.
+bookkeeping.
 
 **What do the auto-mode probes cost?** Failed probes (limit still active)
 are rejected calls and are believed to cost nothing. Each *successful*
@@ -448,11 +429,12 @@ exactly two probes total: one failed probe that reveals the reset time,
 and one successful probe at that time confirming it before the resume. If
 you want zero probe overhead, pass an explicit time.
 
-**Why is automatic detection not built yet, when hooks exist?** Because the
-payloads Claude Code emits at a limit hit are undocumented, and code built
-on guessed payloads fails silently at the worst moment. The installed hooks
-record real payloads to `hook-payloads.log`; detection gets built against
-those measurements ([HOOK-FINDINGS.md](HOOK-FINDINGS.md)), not guesses.
+**How does auto-detect know the reset time without me typing it?** It reads
+your local rate snapshot when one exists (the exact reset Claude Code streams
+to its status line, cached on disk — HOOK-FINDINGS F4), scheduling to the
+exact moment with no probe. If none exists, it falls back to a minimal
+`haiku` probe that reads the reset from the measured limit *message*
+(HOOK-FINDINGS F1). Both use formats we measured, not guesses.
 
 **Can two workspaces wait at once?** Yes. Each gets its own daemon and its
 own task entry.
@@ -463,11 +445,12 @@ the machine is awake past the reset time.
 
 ## 10. Uninstalling
 
-```text
-/plugin uninstall claude-auto-resume
+```sh
+claude-auto-resume uninstall
 ```
 
-Then remove runtime data if you want a clean slate:
+This removes the install and the CLI link (and the status-line sensor if you
+added one). Then remove runtime data if you want a clean slate:
 
 ```sh
 rm -rf ~/.claude/auto-resume

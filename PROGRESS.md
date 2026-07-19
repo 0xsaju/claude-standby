@@ -83,13 +83,20 @@ session. Detailed rationale for every decision: `docs/DECISIONS.md`
 
 ## Next
 
-- [ ] **Waiting on a real limit hit** for the HOOK path (hooks capture to
-      `logs/hook-payloads.log`): paste findings into
-      `docs/HOOK-FINDINGS.md` → unblocks Phase 1. (Note: auto-detect probe
-      mode is already proven; this is only for zero-typing hook detection.)
-- [ ] **Phase 1 — Hook detection:** real `detect_limit()` in on-stop.sh,
-      hook-payload session_id capture (D6) → zero-typing scheduling
-      (session resume itself already works via F2 store discovery)
+- [x] **Removed the Claude Code Stop-hook path — 2026-07-19 (D31).** It never
+      did anything functional (`detect_limit()` was a stub; F4 measured the
+      reset time is not in the hook payload anyway), while the working path
+      needs none of it — reset from the rate stream (F4) / probe message (F1),
+      session id from the store (F2). Deleted `on-stop.sh`, `setup-hooks.sh`,
+      `plugin/hooks/hooks.json`, the `setup-hooks`/`remove-hooks` CLI commands
+      + doctor hook line, install-time registration, ~29 hook tests, and the
+      cockpit's hooks checklist/readiness gating (ready = CLI installed). Docs
+      swept (README incl. a proper system diagram, USER-GUIDE, ARCHITECTURE,
+      CLAUDE.md, CONTRIBUTING, HOOK-FINDINGS note). Zero-arming later, if
+      wanted, is a rate-file watcher (launchd/cron), not a hook.
+- [ ] **Zero-arming detection (optional, replaces the old hook idea):** an
+      always-on rate-file watcher (launchd/cron) that arms a resume when
+      `used_percentage` crosses the limit — no pre-typed `resume-at auto`.
 - [ ] **Multiple schedules per workspace** (cockpit renders the list
       already): schema v3 (tasks get ids), per-schedule daemon + cancel.
 - [x] **Resume-timing safety + doc refresh — 2026-07-19 (D30).** Resumes now
@@ -150,10 +157,10 @@ daemon's own probes create session files that would poison any
 "most recent" lookup (D23; this is also why `--continue` is never used).
 Session discovery reads the measured store layout (HOOK-FINDINGS F2)
 read-only; picks flow through `resume-at --session` in both CLI and
-cockpit. 257 tests green (and stable across a 10× repeat loop — a
-time-of-day flake in the auto-parse test was found and killed during the
-go-live corner pass; see the dated entry above). **C6 (real-limit
-`--resume`) is still UNVERIFIED**
+cockpit. 231 tests green (was 257 before the hook removal, D31, dropped ~29
+hook tests; stable across a 10× repeat loop — a time-of-day flake in the
+auto-parse test was found and killed during the go-live corner pass; see
+the dated entries above). **C6 (real-limit `--resume`) is still UNVERIFIED**
 — an earlier PROGRESS note claiming it was proven was written by a rogue
 resume: auto-detect had been scheduled on a *non-limited* session, the
 first probe succeeded, and the daemon resumed a healthy session (D27, now
@@ -162,8 +169,10 @@ still needs an actual limit while auto-detect is armed with `limit_seen`
 set. A subtle install gotcha also surfaced: the cockpit drives the CLI at
 `~/.claude-auto-resume` (a git clone), which can lag the repo — if
 `--session` seems ignored, `git -C ~/.claude-auto-resume pull` to refresh
-it. Still pending: everything blocked on hook-payload data (Phase 1).
-All state manipulation goes through lib.sh's public API; detection code
-may only match formats documented in docs/HOOK-FINDINGS.md (C1). Keep
+it. The Stop-hook path was removed (D31) — detection reads local data
+(F4 rate stream / F1 probe), session id from the store (F2); there is no
+hook, no `settings.json` hook registration, no `on-stop.sh`. All state
+manipulation goes through lib.sh's public API; detection code may only
+match formats measured in docs/HOOK-FINDINGS.md (C1). Keep
 docs/USER-GUIDE.md in sync with any behavior change, and keep the VS Code
 extension a thin shell.

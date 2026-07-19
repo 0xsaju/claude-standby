@@ -5,31 +5,26 @@ well-tested changes over big ambitious ones.
 
 ## The most valuable contribution needs no code
 
-Automatic limit detection is blocked on one thing: **measured hook
-payloads from a real limit hit.** If you use the tool with hooks
-registered (the installer does this) and you hit a usage limit:
-
-1. Open `~/.claude/auto-resume/logs/hook-payloads.log`.
-2. Copy the entries around the limit-hit timestamp.
-3. **Sanitize them** — payloads can include your prompt text and file
-   paths; redact anything private. What matters is the *structure*: which
-   events fired, field names, the limit message wording, timestamp
-   formats.
-4. Open an issue titled `hook capture: <interactive|headless>, <limit
-   type if known>` and paste the excerpt, or add it directly to
-   `docs/HOOK-FINDINGS.md` in a PR.
+Detection leans on a few **measured** formats (`docs/HOOK-FINDINGS.md`): the
+limit-hit message wording, the session-store layout, and the status-line
+rate stream. Real-world confirmation on hardware/accounts we can't test is
+gold — especially the exact `used_percentage` value the status line reports
+when Claude Code actually blocks (our `AR_LIMIT_PCT=100` default is
+unverified). If you hit a real limit, `claude-auto-resume doctor` shows what
+the tool read; a sanitized paste of that (and the limit message wording) in
+an issue directly improves detection.
 
 Also valuable, takes ten seconds: the exit code of a limited headless
 call — `claude -p "ok" --model haiku >/dev/null 2>&1; echo $?`.
 
 ## Ground rules (the short version of CLAUDE.md)
 
-- **C1 — No invented payload shapes.** Detection code may only match
-  formats documented in `docs/HOOK-FINDINGS.md`, and must cite them.
+- **C1 — No invented formats.** Detection code may only match formats
+  measured in `docs/HOOK-FINDINGS.md`, and must cite them.
 - **C2 — Portable bash.** macOS (BSD userland) + Linux (GNU). No hard
   `jq` dependency — the state library degrades jq → python3 → awk/sed.
-- **C4 — Hooks never break the host.** Hook scripts always `exit 0`,
-  finish fast, log to file, never stderr.
+- **C4 — Never break the host.** The status-line sensor always `exit 0`,
+  finishes fast, chains any existing status line, never writes stderr noise.
 - **C6 — Real quota is precious.** All iterative testing runs against
   `test/fake-claude.sh`. Tests must never invoke the real `claude` or
   touch real user config (`~/.claude/settings.json` is isolated via

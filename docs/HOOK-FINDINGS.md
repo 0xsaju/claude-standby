@@ -1,33 +1,22 @@
 # Hook findings — limit-hit behavior
 
-**STATUS: PARTIALLY VERIFIED — headless stdout format (F1), session store
-layout (F2), and resume flags (F3) measured; hook payloads and limit-time
-transcript behavior still unmeasured.**
+**STATUS: the measured formats we depend on — headless stdout limit message
+(F1), session store layout (F2), resume flags (F3), and the status-line rate
+stream (F4) — are documented below and in active use.**
 
-All detection code must stay stubbed (TODO(C1) markers in
-`plugin/scripts/on-stop.sh`) until the **Findings** section below contains
-real probe output. Detection logic must cite this file and match only
-formats documented here. No invented payload shapes.
+> **The Stop/SessionEnd hook detection path was DROPPED on 2026-07-19.**
+> It never worked (detection stayed a stub) and turned out to be
+> unnecessary: the exact reset time comes from the **status-line rate
+> stream** (F4, measured — *not* the hook payload), and a limit is otherwise
+> confirmed by the F1 probe message; the session id to resume comes from the
+> store (F2). The `on-stop.sh` hook, `setup-hooks`, and the payload-capture
+> log were removed. The file name and the historical "Open questions" table
+> below are kept for provenance — the findings F1–F4 are what the code cites.
 
-## How to produce the data
+Detection logic must cite this file and match only formats documented here.
+No invented formats.
 
-Capture is automatic: with the hooks registered (`setup-hooks` or the
-plugin), `on-stop.sh` appends every Stop/SessionEnd payload plus a 40-line
-transcript tail to `~/.claude/auto-resume/logs/hook-payloads.log`. After a
-limit hit, copy the entries around that timestamp into **Findings** below
-(note whether the session was interactive or headless).
-
-Contributors welcome: if you hit a limit with the hooks installed, a
-sanitized excerpt of that log is the single most valuable contribution
-this project can receive — see CONTRIBUTING.md.
-
-Caveat: only Stop and SessionEnd are captured. If a real limit hit shows
-nothing on those events (Q7), temporarily add SessionStart/Notification
-hooks the same way to answer Q3. (A standalone probe plugin that captured
-all four events existed early on; it was removed once capture moved into
-on-stop.sh — see git history if needed.)
-
-## Open questions
+## Open questions (historical — the hook path was dropped, see note above)
 
 | # | Question | Why it matters | Answer |
 |---|---|---|---|
@@ -163,11 +152,13 @@ statusline keeps refreshing (and thus keeps `rate.json` fresh) once blocked.
   `plugin/scripts/lib.sh`, the rate-aware auto path in
   `plugin/scripts/daemon.sh`, and `setup-statusline` registration.
 
-## Consequences once filled
+## Status of the once-open plans
 
-- `plugin/scripts/on-stop.sh` `detect_limit()` gets real matching.
-- `resume_at` parser written against Q5's exact format.
-- `test/fake-claude.sh` fixture text updated from GUESSED to the real
-  format (see DECISIONS D5).
-- If Q7 is "yes, nothing fires": build the supervisor wrapper; on-stop.sh
-  keeps its shape, only the trigger changes.
+- ~~`on-stop.sh` `detect_limit()` gets real matching~~ — **obsolete**: the
+  hook path was dropped 2026-07-19 (see the note at the top). Detection runs
+  off F4 (rate stream) + the F1 probe message instead.
+- `resume_at` parser is written against F1's measured format
+  (`ar_parse_reset_time` in `plugin/scripts/lib.sh`).
+- `test/fake-claude.sh` emits the F1 format (see DECISIONS D5).
+- ~~supervisor-wrapper fallback if nothing fires~~ — **not needed**: nothing
+  depends on a hook firing anymore.

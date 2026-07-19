@@ -21,7 +21,8 @@ if [ -z "$PROMPT" ]; then
 fi
 
 WS="$(pwd)"
-# session_id stays empty here; the Stop/SessionEnd hook fills it (D6).
+# session_id stays empty here; resume-at discovers it from the session
+# store (HOOK-FINDINGS F2) and pins it at schedule time.
 if ! ar_task_upsert "$WS" \
     "status=running" \
     "importance=$IMPORTANCE" \

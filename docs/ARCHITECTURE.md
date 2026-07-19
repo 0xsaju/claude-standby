@@ -21,16 +21,6 @@ The primary interface (D15/D17): a thin dispatcher over the engine
 scripts. Zero token cost, and works while rate-limited — when nothing
 needing a model turn can run.
 
-### Sensor — Claude Code hooks (`on-stop.sh`)
-
-Hooks fire when a session stops — the one mechanism that can detect a
-limit hit unattended and capture the session_id for a true `--resume`.
-Detection logic is stubbed until HOOK-FINDINGS has the payload data (C1).
-Canonical registration is **directly in `~/.claude/settings.json`** via
-`setup-hooks` (D20), done automatically by the installer; the Claude Code
-plugin (`plugin/hooks/`) packages the same hooks as an alternative — use
-one or the other, never both.
-
 ### Sensor — status-line rate capture (`statusline.sh`)
 
 Claude Code streams live usage — `rate_limits.five_hour.{used_percentage,
@@ -43,8 +33,9 @@ is present (e.g. `/tmp/claude_rate_cache_$USER.json`), so many setups get
 exact-reset detection with zero setup. Resolution order:
 `CLAUDE_AUTO_RESUME_RATE_FILE` → `AR_CFG_RATE_SOURCE` → our `rate.json` →
 the common `/tmp` cache. With no snapshot at all, auto mode falls back to
-the `haiku` probe path. Note: this reset time is **not** in the Stop hook
-payload (F4, measured) — only the status-line stream carries it.
+the `haiku` probe path. Note: this reset time is **not** in any Stop/
+SessionEnd hook payload (F4 measured that; it's why the hook path was
+dropped) — only the status-line stream carries it.
 
 ### Cockpit — VS Code extension (`vscode-extension/`)
 
@@ -92,8 +83,9 @@ Field notes:
 
 - **workspace key** — the absolute working directory at `claude-auto-resume start` time;
   one tracked task per workspace (see DECISIONS D3).
-- **session_id** — filled from hook payloads once a session stops (hooks
-  receive it; the CLI has no way to know it). Empty until then.
+- **session_id** — the conversation to continue, discovered from the
+  session store (HOOK-FINDINGS F2) and pinned at schedule time so the
+  daemon's own probe calls can't hijack "most recent".
 - **resume_at** — ISO-8601 with timezone so the daemon compares wall clock
   unambiguously across suspend/resume. In `auto` mode it holds the *next
   probe time* instead of a known reset time (D13).
@@ -111,40 +103,36 @@ Field notes:
 The daemon doesn't care *who* decided a resume is needed — it only reads
 state. Two things write that state:
 
-1. **Manual scheduling (implemented — D10):** the user saw the limit
-   message and runs `claude-auto-resume resume-at <when>`. The command sets
-   `status=waiting` + `resume_at` and spawns the daemon. No detection
-   involved; the human is the detector.
-2. **Probe-based auto detection (implemented — D13):** `claude-auto-resume resume-at`
-   with no time. The daemon fires a minimal `claude -p "ok" --model haiku`
-   every 30 min; while limited it fails, and the first success means the
-   limit has provably reset — exit-code-only, so C1 is untouched. Bounded
-   by a give-up window (default 6 h) to catch weekly caps.
-3. **Hook-based detection (Phase 1, blocked on HOOK-FINDINGS.md):**
-   `on-stop.sh` recognizes the limit in the hook payload/transcript, writes
-   the same fields, spawns the same daemon. This upgrades auto mode from
-   "poll every 30 min" to "know the exact reset time instantly, zero probe
-   cost" — same state contract, same daemon.
+1. **Manual scheduling (D10):** the user saw the limit message and runs
+   `claude-auto-resume resume-at <when>`. The command sets `status=waiting`
+   + `resume_at` and spawns the daemon. No detection involved; the human is
+   the detector.
+2. **Auto detection (D13/D29):** `claude-auto-resume resume-at` with no
+   time. The daemon knows the exact reset time from a local rate snapshot
+   (HOOK-FINDINGS F4) and waits for it — zero probe cost; or, with no
+   snapshot, it falls back to a minimal `claude -p "ok" --model haiku` probe
+   that trusts the measured limit message (F1). Bounded by a give-up /
+   armed window to catch weekly caps and stand down cleanly.
 
 This is why the daemon could ship before detection: the state contract
 decouples them.
 
 ## Lifecycle loop
 
-1. User starts a tracked task: `claude-auto-resume start <importance> <prompt>`.
-2. Session runs. If the limit hits, the session stops → **Stop/SessionEnd
-   hook** fires → `on-stop.sh` inspects the transcript tail.
-3. Not a limit? Mark the task done. Limit? Write resume state (`limit-hit`,
-   `resume_at`), notify the user, spawn a detached daemon
-   (`nohup ... & disown`).
-4. Daemon sleep-loops until `resume_at`: wake every 60 s and compare wall
+1. You hit a limit and run `claude-auto-resume resume-at` (auto), or
+   `resume-at <when>` for a known time. The command writes resume state
+   (`status=waiting`, `resume_at`, the pinned `session_id`) and spawns a
+   detached daemon (`nohup ... & disown`).
+2. In auto mode the daemon learns the exact reset time from the local rate
+   snapshot (F4), or falls back to a minimal probe that reads the measured
+   limit message (F1). It waits for that reset (plus a safety buffer).
+3. Daemon sleep-loops until `resume_at`: wake every 60 s and compare wall
    clock — never one long `sleep`, because laptop suspend breaks it.
-5. Daemon resumes: `claude --resume <session_id> -p "<resume prompt>"` in
+4. Daemon resumes: `claude --resume <session_id> -p "<resume prompt>"` in
    headless mode with pre-approved permissions.
-6. The resumed session ends → hook fires again → the loop closes: task done,
-   or another limit hit → schedule the next resume. Bounded by `max_resumes`
-   and stuck detection (two consecutive resumes with no PROGRESS.md change →
-   stop and notify).
+5. The resume finishes: task done, or another limit → schedule the next
+   resume. Bounded by `max_resumes` and stuck detection (two consecutive
+   resumes with no PROGRESS.md change → stop and notify).
 
 ## Importance tiers
 
@@ -162,18 +150,12 @@ summary + PROGRESS.md contents.
 
 ## Detection: the C1 rule
 
-Which hooks fire on a limit hit — and what their payloads and the transcript
-contain — is **unknown until measured on a real limit hit**. The registered
-hooks capture every Stop/SessionEnd payload to
-`~/.claude/auto-resume/logs/hook-payloads.log`; results land in
-`docs/HOOK-FINDINGS.md`. All detection logic must match only against
-documented findings. Until then, `on-stop.sh`'s detection is a
-clearly-marked stub.
-
-**Fallback design:** if findings show hooks don't fire on limit-hit, we
-switch to a supervisor wrapper script that launches and watches the claude
-process. `on-stop.sh` is structured so only its *trigger* changes (hook vs
-supervisor); the daemon and state logic stay identical.
+Detection logic may only match formats **measured** and documented in
+`docs/HOOK-FINDINGS.md` — never invented shapes. The formats we rely on are
+F1 (the limit-hit **message** wording + announced reset time), F2 (the
+session-store layout, for discovering the session id to resume), and F4 (the
+status-line rate stream: `used_percentage` + exact `resets_at`). If a format
+isn't measured there, the code doesn't parse it.
 
 **Auto-mode detection (measured formats only).** A scheduled auto-detect
 task detects and times a reset from local data documented in HOOK-FINDINGS,

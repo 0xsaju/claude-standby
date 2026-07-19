@@ -25,8 +25,8 @@ say() { printf '%s\n' "$*"; }
 die() { printf 'install: %s\n' "$*" >&2; exit 1; }
 
 if [ "${1:-}" = "--uninstall" ]; then
-  if [ -f "$INSTALL_DIR/plugin/scripts/setup-hooks.sh" ]; then
-    bash "$INSTALL_DIR/plugin/scripts/setup-hooks.sh" remove 2>/dev/null | grep -v "nothing to remove" || true
+  if [ -f "$INSTALL_DIR/plugin/scripts/setup-statusline.sh" ]; then
+    bash "$INSTALL_DIR/plugin/scripts/setup-statusline.sh" remove 2>/dev/null | grep -v "nothing to remove" || true
   fi
   rm -f "$LINK"
   rm -rf "$INSTALL_DIR"
@@ -72,15 +72,6 @@ bash -n "$INSTALL_DIR/plugin/scripts/lib.sh" || die "installed scripts failed a 
 mkdir -p "$BIN_DIR"
 ln -sf "$INSTALL_DIR/bin/claude-auto-resume" "$LINK"
 say "Linked $LINK -> $INSTALL_DIR/bin/claude-auto-resume"
-
-say ""
-say "Registering Claude Code hooks (groundwork for automatic limit detection) ..."
-if [ -z "${CAR_NO_HOOKS:-}" ]; then
-  "$INSTALL_DIR/bin/claude-auto-resume" setup-hooks ||
-    say "  hook setup didn't complete — run 'claude-auto-resume setup-hooks' later"
-else
-  say "  skipped (CAR_NO_HOOKS set)"
-fi
 
 case ":$PATH:" in
   *":$BIN_DIR:"*) ;;

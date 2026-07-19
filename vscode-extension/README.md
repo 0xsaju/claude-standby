@@ -9,10 +9,9 @@ or parses Claude Code itself.
 ## Features
 
 - **Onboarding / setup** — first run opens a setup checklist (terminal CLI
-  installed · detection hooks registered · Claude Code detected · state
-  file healthy) with inline **Install** and **Register** actions; once
-  everything is green it hands off to the dashboard. Reachable later via
-  the header "Setup" link.
+  installed · Claude Code detected · state file healthy) with an inline
+  **Install** action; once the CLI is present it hands off to the dashboard.
+  Reachable later via the header "Setup" link.
 - **Full-page dashboard** — clicking the activity-bar logo opens the
   dashboard as an editor tab: a schedule composer for the current
   workspace (which conversation to continue, a resume prompt prefilled to
@@ -34,7 +33,7 @@ or parses Claude Code itself.
   resume interrupted by a dead daemon. Refreshed on state-file changes plus
   a 5-second fallback poll.
 - **Menu / commands** — Schedule Resume, Show Status, Cancel Task, Open
-  Log, Register Detection Hooks.
+  Log, Install Terminal Tool.
 - **About links** — set `claudeAutoResume.author.github` / `.linkedin` /
   `.buyMeACoffee` in settings; each link shows only when its URL is set.
 

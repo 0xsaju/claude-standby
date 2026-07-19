@@ -6,7 +6,7 @@
 #
 # Usage: setup-statusline.sh install | remove | status
 #
-# Safety rules (same discipline as setup-hooks.sh, D20):
+# Safety rules (settings.json edits, D20 discipline):
 #   - CHAINS, never clobbers: if you already have a status line, its command
 #     is saved to $AR_HOME/statusline-chain and run by our sensor with the
 #     same stdin, so your display is unchanged.

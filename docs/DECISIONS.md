@@ -496,3 +496,30 @@ No schema change (resume_at semantics unchanged, still an ISO time). Plugin
 0.5.1. +2 regression tests (grace applied; grace 0 = exact). Cockpit already
 renders whatever `resume_at` holds, so it surfaces the buffered time with no
 change.
+
+## D31 — 2026-07-19 — Remove the Claude Code Stop-hook path entirely
+
+The plugin's Stop/SessionEnd hook (`on-stop.sh`, `setup-hooks`,
+`plugin/hooks/hooks.json`) was removed. Rationale: it never did anything
+functional. `detect_limit()` was a hardcoded stub (C1 — the limit-payload
+shape was never measured), so the hook only appended payloads to
+`hook-payloads.log` for research that never completed. Meanwhile the working
+auto-resume path needs none of it:
+- The exact reset time comes from the status-line rate stream (F4) or a
+  probe's limit message (F1) — measured (F4 confirmed the reset time is NOT
+  in the hook payload anyway; 815 captured payloads, zero hits).
+- The `--resume` session id comes from the session store (F2), pinned at
+  schedule time.
+
+So the hook was dead weight that still touched `~/.claude/settings.json` on
+install and added a cockpit setup step. Removed: the three files, the
+`setup-hooks`/`remove-hooks` CLI commands + doctor hook line, install-time
+registration, ~29 hook tests, and the cockpit's hooks checklist/readiness
+gating (ready now = CLI installed). `HOOK-FINDINGS.md` stays — F1/F2/F4 are
+still the source of truth for the paths we DO use; only the hook mechanism
+is gone.
+
+**Zero-arming later, if we want it:** the better mechanism is an always-on
+rate-file watcher (launchd/cron), not a hook — more reliable, and it doesn't
+depend on the unproven assumption that hooks fire on a limit. Today you arm
+with one `resume-at auto`. No schema change.

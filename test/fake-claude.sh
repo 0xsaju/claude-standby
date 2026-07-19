@@ -29,7 +29,7 @@
 #
 # NOTE (D5): the stdout limit message is the MEASURED format
 # (docs/HOOK-FINDINGS.md F1). The transcript JSONL format is still a GUESS;
-# reconcile when hook/transcript probe data lands.
+# reconcile if transcript-format findings land.
 set -u
 
 MODE="${FAKE_CLAUDE_MODE:-clean}"

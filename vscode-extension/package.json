@@ -95,10 +95,6 @@
       {
         "command": "claudeAutoResume.installCli",
         "title": "Claude Auto-Resume: Install Terminal Tool"
-      },
-      {
-        "command": "claudeAutoResume.setupHooks",
-        "title": "Claude Auto-Resume: Register Detection Hooks"
       }
     ],
     "menus": {

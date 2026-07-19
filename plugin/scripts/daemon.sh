@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # daemon.sh — detached wait-and-resume daemon for ONE workspace.
 #
-# Spawned by task-resume-at.sh (and later by on-stop.sh once detection
-# exists) via: nohup daemon.sh <workspace> & disown
+# Spawned by task-resume-at.sh via: nohup daemon.sh <workspace> & disown
 #
 # Loop: wake every $AR_DAEMON_TICK_SECS (default 60), re-read state, compare
 # wall clock against resume_at — never one long sleep, because laptop

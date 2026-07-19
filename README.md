@@ -69,9 +69,10 @@ curl -fsSL https://raw.githubusercontent.com/0xsaju/claude-auto-resume/main/inst
 ```
 
 This is the **complete** setup: the CLI lands on your PATH
-(`~/.local/bin`), the engine in `~/.claude-auto-resume`, and the Claude
-Code detection hooks are registered — merged carefully and reversibly into
-`~/.claude/settings.json`, with a timestamped backup first.
+(`~/.local/bin`) and the engine in `~/.claude-auto-resume`. Nothing else to
+configure — exact-reset detection works automatically if your status line
+already caches your usage (otherwise `claude-auto-resume setup-statusline`
+adds a tiny sensor, opt-in).
 
 The tool manages itself from then on:
 
@@ -122,7 +123,6 @@ Tip: `alias car='claude-auto-resume'`.
 | `cancel` | Stop now: daemon and any in-flight resume are killed. |
 | `log [n]` / `watch` | Show / follow the log. |
 | `doctor` | Full environment self-check. |
-| `setup-hooks` / `remove-hooks` | (De)register the detection hooks — the installer already did this. |
 | `setup-statusline` / `remove-statusline` | Opt-in: capture the exact reset time from your status line for exact-reset detection (chains any existing status line). |
 | `update` / `uninstall` / `version` | Tool management. |
 
@@ -130,76 +130,96 @@ Full reference with examples: **[User Guide](docs/USER-GUIDE.md)**.
 
 ## How it works
 
+The whole system is one small engine behind `state.json`, fed by data
+Claude Code already produces. Nothing polls a server, nothing guesses:
+
 ```mermaid
-stateDiagram-v2
-    [*] --> waiting : resume-at <time · auto>
-    waiting --> resuming : reset reached\n(per importance tier)
-    resuming --> done : session finishes cleanly
-    resuming --> waiting : still limited → back off, retry\n(bounded by max_resumes)
-    resuming --> failed : max_resumes exhausted
-    waiting --> cancelled : cancel
-    done --> [*]
-    failed --> [*]
-    cancelled --> [*]
+flowchart TB
+    subgraph cc["Claude Code"]
+        session["Your long-running<br/>agentic session"]
+        statusline["status-line stream<br/>used% · resets_at"]
+        store["session store<br/>~/.claude/projects"]
+    end
+
+    subgraph engine["claude-auto-resume  (zero tokens, works while limited)"]
+        cli["CLI · resume-at / status / cancel"]
+        state[("state.json<br/>the one contract")]
+        daemon["daemon<br/>wakes 60s · compares wall-clock"]
+    end
+
+    cockpit["VS Code cockpit"]
+    resume(["claude --resume &lt;session&gt;<br/>the SAME conversation continues"])
+
+    session -- "you hit a limit" --> cli
+    store -- "session id, pinned (F2)" --> cli
+    cli -- "schedule + spawn" --> state
+    cli --> daemon
+    state <--> daemon
+
+    statusline -. "cached on disk" .-> rate["exact reset (F4)"]
+    rate -- "no quota" --> daemon
+    daemon -. "if no rate data" .-> probe["one haiku probe<br/>reads limit message (F1)"]
+    probe --> daemon
+
+    daemon == "at reset + safety grace" ==> resume
+    resume -- "done / still-limited → retry" --> state
+    cockpit <--> state
+    cockpit -- "actions" --> cli
 ```
 
-1. **Schedule** — `resume-at` records the task in
-   `~/.claude/auto-resume/state.json` and spawns a small detached daemon.
+1. **Schedule** — `resume-at` pins the session to continue, records the task
+   in `~/.claude/auto-resume/state.json`, and spawns a small detached daemon.
 2. **Wait** — the daemon wakes every 60 seconds, re-reads state (so cancel
-   and reschedule always take effect), and compares wall-clock time.
-   Each tick is a few local file reads: zero tokens, zero network.
-3. **Detect** — in auto mode the daemon first looks for your live reset
-   time in Claude Code's own usage data (streamed to the status line — a
-   source we measured, not guessed). Found? It schedules for that exact
-   moment with no probe and no quota. If no local data exists, it fires one
-   minimal `haiku` probe; still limited, the limit message itself announces
-   the reset time (`…resets 4:10pm (Asia/Dhaka)`), which the daemon parses
-   and waits for.
-4. **Resume** — `claude --resume <session> -p "…Check PROGRESS.md first"`
-   runs headlessly. Success → `done`. A bounce off a still-active limit →
-   back off and retry, at most `max_resumes` times, then report honestly.
+   and reschedule always take effect within a tick), and compares wall-clock
+   time. Each tick is a few local file reads: zero tokens, zero network.
+3. **Detect the reset** — auto mode reads your live reset time from Claude
+   Code's own usage data (streamed to the status line — a source we
+   *measured*, F4) and schedules for that exact moment, no probe, no quota.
+   No local data? It falls back to one minimal `haiku` probe whose limit
+   message announces the reset time (`…resets 4:10pm`, measured — F1).
+4. **Resume** — a safety beat after the reset, `claude --resume <session>`
+   continues the exact conversation headlessly. Success → `done`; a bounce
+   off a still-active limit → back off and retry, bounded by `max_resumes`.
 
-Everything the daemon knows lives in one human-readable file —
-`state.json` — which is also the contract every UI reads. One engine, many
-front doors:
+Task states move `waiting → resuming → done` (or `failed` / `cancelled`).
+Everything the daemon knows lives in that one human-readable `state.json` —
+also the contract every UI reads. One engine, many front doors:
 
 ```text
-bin/claude-auto-resume    the CLI — primary interface
-plugin/scripts/           the engine: state, daemon, hooks, time parsing
-plugin/hooks/             the same hooks as a Claude Code plugin (alternative)
-vscode-extension/         status-bar cockpit for VS Code (MVP)
-test/                     fake-claude stub + 200-test suite
+bin/claude-auto-resume    the CLI — the only interface
+plugin/scripts/           the engine: state, daemon, rate sensor, time parsing
+vscode-extension/         status-bar + dashboard cockpit for VS Code
+test/                     fake-claude stub + full test suite
 docs/                     user guide · architecture · decision log · findings
 ```
 
 ## Detection is measured, never guessed
 
-The exact payloads Claude Code emits at a limit hit are undocumented.
-Code built on guessed formats fails silently at the worst possible moment
-— so this project refuses to guess. Every registered hook records real
-payloads to `~/.claude/auto-resume/logs/hook-payloads.log`; detection
-logic is only written against what's documented in
-[HOOK-FINDINGS.md](docs/HOOK-FINDINGS.md), and cites it. The measured
-stdout format already powers reset-time parsing; hook-payload findings
-will unlock the endgame — **zero-typing detection**: limit hits, hooks
-fire, daemon schedules itself, you were never involved.
+The exact behavior Claude Code emits at a limit hit is undocumented, and
+code built on guessed formats fails silently at the worst possible moment
+— so this project refuses to guess. Every detection path is written only
+against formats we **measured** and recorded in
+[HOOK-FINDINGS.md](docs/HOOK-FINDINGS.md), and cites them: the live rate
+stream that carries the exact reset time (F4), the limit *message* the
+fallback probe reads (F1), and the session store the resume id comes from
+(F2). If we haven't measured it, we don't ship logic on it — and weekly
+caps we can't beat, the docs say so plainly.
 
 ## Project status
 
-**Alpha** — the manual and semi-automatic flows are complete and tested;
-full automation awaits real-world hook data.
+**Alpha** — the resume flow is complete and tested end-to-end.
 
 | Capability | Status |
 |---|---|
 | True session resume (`--resume`, session picker in CLI + cockpit) | ✅ |
-| Auto reset detection (probe + measured message parsing) | ✅ |
+| Exact reset detection from local rate data (no polling) | ✅ |
+| Probe fallback with measured limit-message parsing | ✅ |
 | Scheduled resume at a known time | ✅ |
-| Resume daemon: tiers, backoff, caps, instant cancel | ✅ |
+| Resume daemon: tiers, backoff, caps, reset safety grace, instant cancel | ✅ |
 | Task tracking, journal, multi-workspace `list` | ✅ |
-| One-command install incl. hook registration | ✅ |
+| One-command install | ✅ |
 | Full CLI tool surface (update/uninstall/doctor/…) | ✅ |
-| VS Code cockpit | 🧪 MVP, run from source |
-| Hook-based zero-typing detection | 🔬 Awaiting measured payloads |
+| VS Code cockpit | 🧪 MVP + published |
 | `/warmup` window scheduler · stuck detection · resume verification | 🕐 Planned |
 | Native Windows (Task Scheduler) · reboot-surviving schedules | 🕐 Planned |
 
@@ -208,13 +228,13 @@ full automation awaits real-world hook data.
 ```sh
 git clone https://github.com/0xsaju/claude-auto-resume
 cd claude-auto-resume
-bash test/run-tests.sh        # 200 tests, no real quota ever spent
+bash test/run-tests.sh        # full suite, no real quota ever spent
 ```
 
 The suite exercises the state library across three JSON engines (`jq`,
 `python3`, pure `awk`/`sed`), the daemon's full lifecycle, auto-detection
-against a mode-switchable fake claude, hook registration against fixture
-settings files, and the installer end-to-end. Ground rules live in
+(rate-snapshot and probe paths) against a mode-switchable fake claude, the
+status-line rate sensor, and the installer end-to-end. Ground rules live in
 [CLAUDE.md](CLAUDE.md); every non-obvious decision is logged in
 [DECISIONS.md](docs/DECISIONS.md).
 
@@ -224,17 +244,16 @@ settings files, and the installer end-to-end. Ground rules live in
 |---|---|
 | [User Guide](docs/USER-GUIDE.md) | Install, workflows, full command & config reference, troubleshooting, FAQ |
 | [Architecture](docs/ARCHITECTURE.md) | Components, state contract, lifecycle, design constraints |
-| [Decision Log](docs/DECISIONS.md) | Append-only: every decision, dated, with reasoning (D1–D22) |
-| [Hook Findings](docs/HOOK-FINDINGS.md) | Measured limit-hit behavior — the source of truth for detection |
-| [Contributing](CONTRIBUTING.md) | Dev setup, testing rules, how to donate limit-hit captures |
+| [Decision Log](docs/DECISIONS.md) | Append-only: every decision, dated, with reasoning |
+| [Hook Findings](docs/HOOK-FINDINGS.md) | Measured Claude Code behavior (limit message, session store, rate stream) — the source of truth for detection |
+| [Contributing](CONTRIBUTING.md) | Dev setup, testing rules, how to help |
 
 ## Contributing
 
 Contributions are welcome — see **[CONTRIBUTING.md](CONTRIBUTING.md)**.
-The single most valuable contribution right now needs no code at all: if
-you hit a usage limit with the hooks installed, a sanitized excerpt of
-your `hook-payloads.log` directly unblocks automatic detection for
-everyone.
+Real-limit verification is especially valuable: confirming the exact
+`used_percentage` at a genuine block, and that `--resume` continues the
+conversation once it lifts.
 
 ## Limitations
 
