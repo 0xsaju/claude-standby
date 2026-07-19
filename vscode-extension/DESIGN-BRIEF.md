@@ -66,13 +66,7 @@ Top→bottom:
 
 1. **Header** — small brand mark + "Claude Auto-Resume" + version, right
    side: health dot + "Setup" link + quiet refresh. One line, ~40 px.
-2. **Usage strip** (data may be present or absent — design both): a slim
-   row of three inline meters, exactly like a native status readout:
-   `Session ▰▰▱▱ 8% · resets 4:22 PM` · `Week 52% · resets Tue` ·
-   `Model 92%`. Muted; green→amber→red fill by utilization. If usage data
-   is unavailable, the strip shows only:
-   `Session resets ~1:01 PM (inferred from activity)`.
-3. **Current workspace section** — header row: folder name +
+2. **Current workspace section** — header row: folder name +
    muted full path. Contains:
    - **Schedule composer** (a bordered card, labeled fields, full width):
      - **Conversation** — dropdown, entries formatted
@@ -86,7 +80,9 @@ Top→bottom:
        `30m` · `1h` · `2h`, then a simple time input with **AM/PM format**
        (`8 : 30 PM` — hour, minute, AM/PM segmented control or a masked
        input; NOT "20:00 · 45m · ISO" cryptic placeholder). Typing a time
-       deselects the chips.
+       deselects the chips. While `Auto-detect reset` is selected, a muted
+       caption sits under the row: "limit expected to lift ~1:01 PM —
+       inferred from your activity, no quota used".
      - Footer row: importance select (critical / normal / low, quiet) +
        primary amber button **Schedule resume**.
    - **Scheduled resumes list** (a workspace can have SEVERAL): each row =
@@ -95,45 +91,54 @@ Top→bottom:
      `1/3` + a live countdown for the nearest one + cancel (✕, needs
      confirm affordance). Empty state: one muted line "Nothing scheduled
      — the composer above is all you need."
-4. **Other workspaces section** — header + a **project dropdown** listing
+3. **Other workspaces section** — header + a **project dropdown** listing
    every known project (tracked tasks first, then any project with Claude
    sessions on disk; entries: folder name + muted path). Picking one
    reveals the SAME composer (identical component, don't redesign it) for
    that project, plus that project's scheduled-resumes list. Below the
    dropdown: compact rows for every workspace that already has schedules
    (dot · name · next event · cancel).
-5. **Activity** — timeline of journal events, newest first: small glyph +
+4. **Activity** — timeline of journal events, newest first: small glyph +
    time + event + muted detail ("resumed — attempt 1 of 3, continuing
    session 612fb08b"). 6–8 realistic rows telling an overnight story:
    scheduled → limit-hit → reset-detected → resumed → done.
-6. **CLI reference** — collapsible section ("Do all of this from the
+5. **CLI reference** — collapsible section ("Do all of this from the
    terminal"), a two-column mini-table in mono font:
    `claude-auto-resume resume-at` — schedule/reschedule ·
    `sessions` — list conversations · `status` · `cancel` · `doctor` ·
    `log`. One example line under it:
    `claude-auto-resume resume-at 8:30pm --session 2 --prompt "…"`.
    Link "Full user guide →".
-7. **About** — one quiet row, author credit: GitHub · LinkedIn ·
+6. **About** — one quiet row, author credit: GitHub · LinkedIn ·
    Buy me a coffee (text links with small inline SVG glyphs, no big
    badges) + MIT + version.
-8. **Footer** — `~/.claude/auto-resume/state.json · live` + Log · Config.
+7. **Footer** — `~/.claude/auto-resume/state.json · live` + Log · Config.
 
-### Screen C — Status bar + usage popup
+### Screen C — Status bar + tool-status popup
+
+This surface shows OUR TOOL's status only — not Claude account usage. (The
+visual reference for the popup is the polished native "usage popup" style:
+a compact anchored card with labeled rows, progress bars, muted footers —
+borrow that *style*, fill it with auto-resume data.)
 
 1. **Status bar item** (mock a 22 px VS Code status bar strip, bottom):
-   `⟳ 8% · resets 4:22 PM · next resume 8:30 PM` (degrades to
-   `⟳ waiting 20:00` when no usage data).
-2. **Usage popup** — a ~320 px card anchored above the status item
-   (VS Code will render this as a rich hover/quick-pick, so design it as a
-   self-contained card): title row "Claude usage · updated 1m ago", then
-   three labeled progress bars —
-   **Session** `8% used · resets in 4h 29m`,
-   **Weekly** `52% used · resets in 1d 10h`,
-   **Model (Fable)** `92% used · resets in 1d 10h` —
-   bar color green <60% / amber <85% / red ≥85%. Divider, then OUR line:
-   **Next resume** `8:30 PM · claude-auto-resume · session 612fb08b` and a
-   "Open dashboard" link. Design also the fallback variant where only the
-   inferred session reset is known (single bar-less row).
+   brand glyph + current-workspace task state, e.g.
+   `⟳ waiting · resumes 8:30 PM` / `⟳ resuming…` / `⟳ auto · reset ~1:01 PM`
+   / `✓ done` / `✗ failed` / `⟳ auto-resume` (idle, nothing scheduled).
+2. **Tool-status popup** (click on the status item; ~320 px card anchored
+   above it — VS Code renders this as a rich hover/quick-pick, so design a
+   self-contained card): title row "Claude Auto-Resume · updated 1m ago",
+   then for the current workspace:
+   - status word + colored dot + tier badge
+   - **countdown** `Resumes in 2h 14m` (the star of the card)
+   - session line `continues "Master Prompt — …" · 612fb08b`
+   - attempts meter `1 / 3`
+   - when auto-detect: muted line `limit expected to lift ~1:01 PM
+     (inferred)`
+   Divider, then one compact row per OTHER workspace with a schedule
+   (dot · name · next event). Footer actions: **Open dashboard** ·
+   Cancel. Also design the empty variant: "Nothing scheduled" + Open
+   dashboard link.
 
 ## 4. Live data available to the page
 
@@ -142,10 +147,10 @@ Per task: status (waiting · resuming · running · limit-hit · done · failed
 resume_mode (`at` | `auto`), resume_count/max_resumes, custom prompt,
 journal events. Global: current workspace path, all projects (name+path),
 per-project recent sessions (id, title/first-prompt summary, age, size),
-health booleans (CLI, hooks, daemons), version. Usage (when available):
-session/weekly/model utilization % + reset timestamps; else inferred
-session reset time only. Countdown ticks every second — tabular numerals,
-no layout shift.
+health booleans (CLI, hooks, daemons), version, and the **inferred limit
+reset time** for auto-detect (computed locally from the user's activity —
+no quota spent). Countdown ticks every second — tabular numerals, no
+layout shift.
 
 ## 5. Component consistency rules
 
@@ -161,9 +166,10 @@ no layout shift.
 Onboarding mixed + all-green; dashboard with 2 schedules on the current
 workspace (one auto-detect counting down, one fixed-time) + 1 other
 workspace tracked; dashboard empty state (no schedules anywhere — composer
-still primary, page must NOT look broken or hollow); usage strip present
-and absent; popup full and fallback. A tiny fixed state-switcher bar at
-the very top of the HTML is fine (dev-only chrome).
+still primary, page must NOT look broken or hollow); status-bar variants
+(waiting / resuming / auto / idle); popup with an active schedule and
+popup empty. A tiny fixed state-switcher bar at the very top of the HTML
+is fine (dev-only chrome).
 
 ## 7. Visual tokens
 
