@@ -51,21 +51,32 @@ session. Detailed rationale for every decision: `docs/DECISIONS.md`
       reference, About row (author links from settings). Screen C: status
       item + rich MarkdownString tool-status tooltip. View state persisted
       across auto-refresh.
-- [x] **Test suite: 226 green** — three JSON engines, daemon lifecycle,
-      auto mode, session discovery/pinning, prompt/workspace flags,
-      hooks setup/removal, installer cycle, CLI surface.
+- [x] **Test suite: 229 green** — three JSON engines, daemon lifecycle,
+      auto mode, session discovery/pinning (incl. bad-value refusal),
+      prompt/workspace flags, hooks setup/removal, installer cycle, CLI
+      surface. Cockpit client JS additionally exercised out-of-tree via
+      jsdom (21 assertions: AM/PM conversion, escaping, chip precedence,
+      message wiring) — kept out of the suite to preserve the no-tooling
+      convention.
+- [x] **C6 — Real-limit verification of `--resume` (DONE 2026-07-19).**
+      An actual session limit hit while auto-detect was armed on this repo
+      with session `612fb08b` pinned. The daemon probed, saw the limit
+      lift, ran `claude --resume 612fb08b`, and the *original conversation
+      continued* (this session received the resume prompt). Journal:
+      `scheduled → session-pinned → limit-lifted (probe) → resumed
+      (attempt 2 of 3 — continuing session 612fb08b)`. The primary promise
+      is now proven end-to-end against a genuine limit, not just
+      fake-claude.
 
 ## Next
 
-- [ ] **Waiting on a real limit hit** (hooks now capture automatically to
+- [ ] **Waiting on a real limit hit** for the HOOK path (hooks capture to
       `logs/hook-payloads.log`): paste findings into
-      `docs/HOOK-FINDINGS.md` → unblocks Phase 1
+      `docs/HOOK-FINDINGS.md` → unblocks Phase 1. (Note: auto-detect probe
+      mode is already proven; this is only for zero-typing hook detection.)
 - [ ] **Phase 1 — Hook detection:** real `detect_limit()` in on-stop.sh,
       hook-payload session_id capture (D6) → zero-typing scheduling
       (session resume itself already works via F2 store discovery)
-- [ ] **Real-limit verification of `--resume`:** on the next limit hit,
-      schedule with a pinned session and confirm the conversation
-      actually continues (C6 milestone burn)
 - [ ] **Multiple schedules per workspace** (cockpit renders the list
       already): schema v3 (tasks get ids), per-schedule daemon + cancel.
 - [ ] **Quota-free reset inference in the engine:** the 5-hour window is
@@ -92,8 +103,13 @@ daemon's own probes create session files that would poison any
 "most recent" lookup (D23; this is also why `--continue` is never used).
 Session discovery reads the measured store layout (HOOK-FINDINGS F2)
 read-only; picks flow through `resume-at --session` in both CLI and
-cockpit. 226 tests green. Still pending: verify `--resume` against a real
-limit once one hits (C6), plus everything blocked on hook-payload data.
+cockpit. 229 tests green. **C6 is now proven for real** — on 2026-07-19 an
+actual limit hit while auto-detect was armed here, and the daemon resumed
+this pinned session (`612fb08b`) so the conversation continued (see Done).
+A subtle install gotcha surfaced that day: the cockpit drives the CLI at
+`~/.claude-auto-resume` (a git clone), which can lag the repo — if
+`--session` seems ignored, `git -C ~/.claude-auto-resume pull` to refresh
+it. Still pending: everything blocked on hook-payload data (Phase 1).
 All state manipulation goes through lib.sh's public API; detection code
 may only match formats documented in docs/HOOK-FINDINGS.md (C1). Keep
 docs/USER-GUIDE.md in sync with any behavior change, and keep the VS Code
