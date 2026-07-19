@@ -138,7 +138,17 @@ resolve_session() {
   fi
   # id or unique id prefix
   id="$(ar_sessions_list "$WS" | cut -f1 | grep -i "^$want" | head -1)"
-  printf '%s\n' "${id:-$want}"
+  if [ -n "$id" ]; then
+    printf '%s\n' "$id"
+    return 0
+  fi
+  # Nothing in the listing matches. Accept the value only if it already
+  # has the shape of a full session id (so a valid id beyond the listing
+  # cap can still be pinned); otherwise print nothing, so the caller
+  # refuses a typo instead of silently pinning garbage.
+  if printf '%s' "$want" | grep -Eq '^[0-9a-fA-F-]{32,40}$'; then
+    printf '%s\n' "$want"
+  fi
 }
 
 if [ -n "$SESSION_ARG" ]; then

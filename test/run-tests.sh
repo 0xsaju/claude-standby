@@ -533,7 +533,22 @@ t_eq "pin: reschedule keeps existing pin" "$OLD_ID" "$(ar_task_get "$SWS" sessio
 
 # unknown --session refuses instead of silently starting a new chat
 SOUT="$(cd "$SWS" && AR_NO_DAEMON=1 bash "$PLUGIN/scripts/task-resume-at.sh" now --session 99)"
-t_contains "pin: bad --session refused" "No session matches" "$SOUT"
+t_contains "pin: bad --session index refused" "No session matches" "$SOUT"
+
+# a non-matching, non-uuid-shaped value is a typo, not an id: refuse it
+# instead of pinning the raw string (would resume a nonexistent session).
+SOUT="$(cd "$SWS" && AR_NO_DAEMON=1 bash "$PLUGIN/scripts/task-resume-at.sh" now --session zzzz9999)"
+t_contains "pin: bad --session prefix refused" "No session matches" "$SOUT"
+if [ "$(ar_task_get "$SWS" session_id)" != "zzzz9999" ]; then
+  ok "pin: bad --session prefix never pinned the raw value"
+else
+  fail "pin: bad --session prefix never pinned the raw value"
+fi
+
+# but a full uuid-shaped id not in the listing is still accepted (cap-proof)
+UNLISTED="ffffffff-ffff-ffff-ffff-ffffffffffff"
+(cd "$SWS" && AR_NO_DAEMON=1 bash "$PLUGIN/scripts/task-resume-at.sh" now --session "$UNLISTED" >/dev/null)
+t_eq "pin: uuid-shaped id accepted even if unlisted" "$UNLISTED" "$(ar_task_get "$SWS" session_id)"
 
 # the daemon resumes THE PINNED SESSION: fake-claude appends to
 # <session_id>.jsonl when called with --resume (its transcript is keyed
