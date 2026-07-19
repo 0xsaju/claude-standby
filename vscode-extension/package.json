@@ -2,7 +2,7 @@
   "name": "claude-auto-resume-cockpit",
   "displayName": "Claude Auto-Resume Cockpit",
   "description": "Cockpit for claude-auto-resume: auto-resume Claude Code tasks after usage-limit hits. Sidebar dashboard, status bar, one-click controls — the terminal tool does all the work.",
-  "version": "0.8.1",
+  "version": "0.8.2",
   "publisher": "0xsaju",
   "icon": "icon.png",
   "license": "MIT",
@@ -131,8 +131,8 @@
         },
         "claudeAutoResume.author.github": {
           "type": "string",
-          "default": "https://github.com/0xsaju/claude-auto-resume",
-          "description": "GitHub URL for the About row. Leave empty to hide."
+          "default": "https://github.com/0xsaju",
+          "description": "GitHub profile URL for the About row. Leave empty to hide."
         },
         "claudeAutoResume.author.linkedin": {
           "type": "string",

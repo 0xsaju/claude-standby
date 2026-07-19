@@ -52,8 +52,10 @@ const DEFAULT_PROMPT =
 const BRAND_SVG = `<svg width="18" height="18" viewBox="0 0 18 18"><circle cx="9" cy="9" r="8" fill="#0B1220"/><path d="M9 4a5 5 0 1 0 5 5" fill="none" stroke="#F59E0B" stroke-width="1.8" stroke-linecap="round"/><path d="M14 3.5v3h-3z" fill="#F59E0B"/></svg>`;
 
 // Small inline glyphs for the About row and setup checklist.
-const ICON_LINK = `<svg width="10" height="10" viewBox="0 0 10 10" style="vertical-align:-1px"><path d="M1.5 8.5L8.5 1.5M4 1.5h4.5V6" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>`;
+const ICON_GH = `<svg width="12" height="12" viewBox="0 0 16 16" style="vertical-align:-2px"><path fill="currentColor" d="M8 0a8 8 0 0 0-2.5 15.6c.4.07.55-.17.55-.38v-1.3c-2.2.48-2.67-1.06-2.67-1.06-.36-.92-.88-1.16-.88-1.16-.72-.49.05-.48.05-.48.8.06 1.22.82 1.22.82.71 1.22 1.87.87 2.33.66.07-.51.28-.87.5-1.07-1.75-.2-3.6-.88-3.6-3.9 0-.86.31-1.56.82-2.11-.08-.2-.36-1 .08-2.09 0 0 .67-.21 2.2.8a7.6 7.6 0 0 1 4 0c1.53-1.01 2.2-.8 2.2-.8.44 1.09.16 1.89.08 2.09.51.55.82 1.25.82 2.11 0 3.03-1.85 3.7-3.61 3.89.29.24.54.72.54 1.45v2.15c0 .21.15.46.55.38A8 8 0 0 0 8 0Z"/></svg>`;
+const ICON_IN = `<svg width="12" height="12" viewBox="0 0 16 16" style="vertical-align:-2px"><path fill="currentColor" d="M3.4 4.2a1.4 1.4 0 1 0 0-2.8 1.4 1.4 0 0 0 0 2.8ZM2.2 5.3h2.4v8H2.2v-8Zm4 0h2.3v1.1h.03c.32-.6 1.1-1.24 2.27-1.24 2.43 0 2.88 1.6 2.88 3.68v4.45h-2.4V9.3c0-.87-.02-2-1.22-2-1.22 0-1.4.95-1.4 1.94v4.06h-2.4v-8Z"/></svg>`;
 const ICON_COFFEE = `<svg width="11" height="10" viewBox="0 0 11 10" style="vertical-align:-1px"><path d="M2 3h5v3.5A2.5 2.5 0 0 1 4.5 9A2.5 2.5 0 0 1 2 6.5zM7 4h1a1 1 0 0 1 0 2H7" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/></svg>`;
+const STAR = `<svg width="13" height="13" viewBox="0 0 16 16" style="vertical-align:-2px"><path fill="currentColor" d="M8 1.2l1.9 4 4.4.5-3.3 3 .9 4.3L8 10.9 4.1 13l.9-4.3-3.3-3 4.4-.5L8 1.2Z"/></svg>`;
 const CHECK = `<svg class="ck" width="14" height="14" viewBox="0 0 14 14"><circle cx="7" cy="7" r="6" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M4.2 7.2l2 2 3.6-4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 const CROSS = `<svg class="ck" width="14" height="14" viewBox="0 0 14 14"><circle cx="7" cy="7" r="6" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M4.8 4.8l4.4 4.4M9.2 4.8l-4.4 4.4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>`;
 
@@ -488,17 +490,26 @@ function cliReference() {
   </details>`;
 }
 
+const REPO_URL = 'https://github.com/0xsaju/claude-auto-resume';
+
 function aboutRow(state) {
   const a = state.author || {};
   const links = [];
   if (a.github)
-    links.push(`<a href="${esc(a.github)}">${ICON_LINK}GitHub</a>`);
+    links.push(`<a href="${esc(a.github)}">${ICON_GH}GitHub</a>`);
   if (a.linkedin)
-    links.push(`<a href="${esc(a.linkedin)}">${ICON_LINK}LinkedIn</a>`);
+    links.push(`<a href="${esc(a.linkedin)}">${ICON_IN}LinkedIn</a>`);
   if (a.buyMeACoffee)
     links.push(`<a href="${esc(a.buyMeACoffee)}">${ICON_COFFEE}Buy me a coffee</a>`);
-  return `<div class="about">
-    ${a.name ? `<span>by ${esc(a.name)}</span>` : ''}
+  return `<section class="support">
+    <div class="support-text">
+      <span class="support-title">${STAR} Enjoying Claude Auto-Resume?</span>
+      <span class="dim">It's free and open source. A star helps other people find it.</span>
+    </div>
+    <a class="star-btn" href="${REPO_URL}">${STAR} Star on GitHub</a>
+  </section>
+  <div class="about">
+    ${a.name ? `<span>Built by ${esc(a.name)}</span>` : ''}
     ${links.join('')}
     <span class="spacer"></span>
     <span>MIT · v${esc(state.extVersion || '')}</span>
@@ -749,16 +760,33 @@ function render(state) {
   .cli-eg { margin-top: 10px; padding: 8px 10px; background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, var(--vscode-widget-border, rgba(128,128,128,.35))); border-radius: 3px; color: var(--vscode-descriptionForeground); overflow-x: auto; white-space: nowrap; }
   .cli-guide { margin-top: 8px; font-size: 11.5px; }
 
-  /* about + footer */
-  .about { display: flex; align-items: center; gap: 14px; margin-top: 22px; padding-top: 12px; border-top: 1px solid var(--vscode-widget-border, rgba(128,128,128,.35)); font-size: 11.5px; color: var(--vscode-descriptionForeground); flex-wrap: wrap; }
-  .about a { display: inline-flex; align-items: center; gap: 4px; }
-  footer { display: flex; align-items: center; gap: 12px; margin-top: 8px; font-size: 11px; color: var(--vscode-descriptionForeground); }
+  /* support + about + footer */
+  .support {
+    display: flex; align-items: center; gap: 14px; margin-top: 28px; padding: 14px 16px;
+    border: 1px solid var(--vscode-widget-border, rgba(128,128,128,.35)); border-radius: 6px;
+    background: var(--vscode-editorWidget-background);
+  }
+  .support-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .support-title { font-size: 12.5px; font-weight: 600; color: var(--vscode-foreground); }
+  .support-title svg { color: #F59E0B; }
+  .support-text .dim { font-size: 11.5px; }
+  .star-btn {
+    display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; flex: none;
+    font-size: 12px; font-weight: 600; padding: 6px 14px; border-radius: 4px;
+    color: #1a1200; background: #F59E0B;
+  }
+  .star-btn:hover { background: #e08e06; text-decoration: none; }
+  .about { display: flex; align-items: center; gap: 16px; margin-top: 14px; font-size: 11.5px; color: var(--vscode-descriptionForeground); flex-wrap: wrap; }
+  .about a { display: inline-flex; align-items: center; gap: 5px; }
+  footer { display: flex; align-items: center; gap: 12px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--vscode-widget-border, rgba(128,128,128,.35)); font-size: 11px; color: var(--vscode-descriptionForeground); }
 
   @media (max-width: 520px) {
     .scr { padding: 18px 16px 36px; }
     .steps { grid-template-columns: 1fr; gap: 12px; }
     .ws-path { display: none; }
     .sched-title { max-width: 100%; }
+    .support { flex-direction: column; align-items: stretch; }
+    .star-btn { justify-content: center; }
   }
 </style>
 </head>
