@@ -46,6 +46,39 @@ The `.vsix` is gitignored (build artifact). `.vscodeignore` keeps dev files
    npx ovsx publish claude-auto-resume-cockpit-<version>.vsix -p <OVSX_TOKEN>
    ```
 
+## Automated publishing (CI)
+
+`.github/workflows/publish-extension.yml` publishes to **both** registries
+when you push a tag matching `ext-v*` (or via the Actions tab's
+"Run workflow" button). It publishes whatever version is in
+`vscode-extension/package.json` — that is the source of truth; the tag only
+triggers the run.
+
+One-time setup — add two repo secrets (GitHub → Settings → Secrets and
+variables → Actions → New repository secret):
+
+- **`VSCE_PAT`** — Azure DevOps PAT, scope **Marketplace: Manage**,
+  organization **All accessible organizations**.
+- **`OVSX_TOKEN`** — Open VSX access token (open-vsx.org → Settings →
+  Access Tokens). Create the `0xsaju` namespace once first
+  (`npx ovsx create-namespace 0xsaju -p <token>`).
+
+A missing secret skips that registry, so you can start with just one.
+
+Cutting a release once the secrets exist:
+
+```sh
+# 1. bump the version (source of truth)
+#    edit vscode-extension/package.json -> "version": "0.8.7"
+git commit -am "Extension 0.8.7: <what changed>"
+# 2. tag and push — this fires the workflow
+git tag ext-v0.8.7
+git push origin main --tags
+```
+
+The workflow packages the vsix and pushes it to the Marketplace and Open VSX.
+No manual upload, no local token handling.
+
 ## Release checklist
 
 - [ ] `bash test/run-tests.sh` green
