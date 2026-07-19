@@ -103,8 +103,11 @@ session. Detailed rationale for every decision: `docs/DECISIONS.md`
 - [ ] **Phase 3 — Polish:** stuck detection (PROGRESS.md unchanged across
       two resumes), resume-verification fallback prompt, `/warmup`
       scheduler, reboot-surviving schedules (launchd/cron one-shots)
-- [ ] **Cockpit:** manual F5 verification pass, then marketplace
-      publishing (needs a publisher account)
+- [ ] **Cockpit:** marketplace publishing — package is publish-ready
+      (0.8.5, `vsce package` clean, icon 256², keywords + `AI` category,
+      `.vscodeignore`). Steps in `docs/PUBLISHING.md`. Blocked only on the
+      user's registry accounts + tokens: **both** MS Marketplace (VS Code)
+      and **Open VSX** (Cursor/Windsurf), publisher id `0xsaju`.
 - [ ] **Native Windows:** Task Scheduler one-shot instead of the
       sleep-loop daemon
 - [ ] Capture on next limit hit: un-piped exit code of a limited call
