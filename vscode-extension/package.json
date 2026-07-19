@@ -2,7 +2,7 @@
   "name": "claude-auto-resume-cockpit",
   "displayName": "Claude Auto-Resume Cockpit",
   "description": "Cockpit for claude-auto-resume: auto-resume Claude Code tasks after usage-limit hits. Sidebar dashboard, status bar, one-click controls — the terminal tool does all the work.",
-  "version": "0.8.6",
+  "version": "0.8.7",
   "publisher": "0xsaju",
   "icon": "icon.png",
   "license": "MIT",

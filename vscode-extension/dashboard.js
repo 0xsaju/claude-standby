@@ -316,7 +316,7 @@ function setupScreen(state) {
       </div>
       <div class="step">
         <div class="step-hd"><span class="step-n">2</span> The tool waits for the reset</div>
-        <div class="dim step-cap">Inferred locally from your activity — no quota used.</div>
+        <div class="dim step-cap">It checks in the background until the limit lifts, or waits until a time you set.</div>
       </div>
       <div class="step">
         <div class="step-hd"><span class="step-n">3</span> Your conversation continues</div>
@@ -386,7 +386,7 @@ function composerCard(idPrefix, ws, state, primary) {
           <button class="seg on" data-ap="PM">PM</button>
         </span>
       </div>
-      <div class="when-hint dim">the reset time is inferred locally from your activity — no quota used</div>
+      <div class="when-hint dim">auto-detect checks every ~30 min with a tiny probe until the limit lifts, then resumes — it doesn't know your reset time in advance</div>
     </div>
     <div class="c-actions">
       <label class="imp-lbl dim">On reset</label>
@@ -431,9 +431,14 @@ function scheduledList(state, ws) {
     task.resume_prompt_template && task.resume_prompt_template !== DEFAULT_PROMPT
       ? 'custom'
       : 'default';
+  // In auto mode resume_at is the NEXT POLL time, not a resume ETA — label
+  // it "next check" so it isn't misread as "resumes in Xm". In fixed-time
+  // mode it really is the resume countdown, so it stands alone.
   const cd =
     task.status === 'waiting' && task.resume_at
-      ? `<span class="cd mono countdown" data-deadline="${esc(task.resume_at)}">—</span>`
+      ? `<span class="cd mono">${
+          auto && !stuck ? '<span class="dim">next check </span>' : ''
+        }<span class="countdown" data-deadline="${esc(task.resume_at)}">—</span></span>`
       : '';
   return `<div class="sched-row">
     <span class="dot bg-${hue} ${task.status === 'resuming' && !stuck ? 'pulse' : ''}"></span>
