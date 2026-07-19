@@ -443,6 +443,20 @@ while kill -0 "$DPID" 2>/dev/null && [ "$WAITED" -lt 15 ]; do sleep 1; WAITED=$(
 kill "$DPID" 2>/dev/null; wait "$DPID" 2>/dev/null
 t_eq "auto-armed: resumes once the seen limit lifts" "done" "$(ar_task_get "$WS15" status)"
 
+# the limit_seen gate must survive under the awk/text engine too (the C2
+# fallback when neither jq nor python3 exists) — otherwise auto-detect
+# could never remember a limit and would never resume on jq-less hosts.
+WS16="$DTMP/ws-armed-text"; mkdir -p "$WS16"
+printf 'clean' > "$MODEFILE"
+(cd "$WS16" && AR_JSON_ENGINE=text AR_NO_DAEMON=1 bash "$PLUGIN/scripts/task-resume-at.sh" auto critical >/dev/null)
+AR_JSON_ENGINE=text AR_DAEMON_ONESHOT=1 bash "$PLUGIN/scripts/daemon.sh" "$WS16"
+t_eq "text-engine: armed (not limited) stays waiting" "waiting" "$(ar_task_get "$WS16" status)"
+WS17="$DTMP/ws-limit-text"; mkdir -p "$WS17"
+printf 'limit' > "$MODEFILE"
+(cd "$WS17" && AR_JSON_ENGINE=text AR_NO_DAEMON=1 bash "$PLUGIN/scripts/task-resume-at.sh" auto critical >/dev/null)
+AR_JSON_ENGINE=text AR_DAEMON_ONESHOT=1 bash "$PLUGIN/scripts/daemon.sh" "$WS17"
+t_eq "text-engine: a seen limit is remembered (limit_seen=1)" "1" "$(ar_task_get "$WS17" limit_seen)"
+
 # auto mode: gives up when limit never lifts within the window
 WS9="$DTMP/ws-auto-giveup"; mkdir -p "$WS9"
 printf 'limit' > "$MODEFILE"

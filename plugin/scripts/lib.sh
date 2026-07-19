@@ -234,6 +234,9 @@ ar__jq_upsert() {
     "resume_mode": "at",
     "resume_count": 0,
     "max_resumes": 3,
+    "limit_seen": "0",
+    "limit_seen_at": "",
+    "armed_noted": "0",
     "resume_prompt_template": $defprompt,
     "last_output_tail": "",
     "progress_file": "PROGRESS.md",
@@ -270,7 +273,9 @@ DEFAULTS = {
     "session_id": "", "status": "running", "importance": "normal",
     "original_prompt": "", "resume_at": "", "resume_mode": "at",
     "resume_count": 0,
-    "max_resumes": 3, "resume_prompt_template": defprompt,
+    "max_resumes": 3,
+    "limit_seen": "0", "limit_seen_at": "", "armed_noted": "0",
+    "resume_prompt_template": defprompt,
     "last_output_tail": "", "progress_file": "PROGRESS.md", "journal": [],
 }
 NUMERIC = {"resume_count", "max_resumes"}
@@ -361,6 +366,9 @@ ar__text_insert_task() {
       print "      \"resume_mode\": \"at\","
       print "      \"resume_count\": 0,"
       print "      \"max_resumes\": 3,"
+      print "      \"limit_seen\": \"0\","
+      print "      \"limit_seen_at\": \"\","
+      print "      \"armed_noted\": \"0\","
       print "      \"resume_prompt_template\": \"" ENVIRON["AR_DP"] "\","
       print "      \"last_output_tail\": \"\","
       print "      \"progress_file\": \"PROGRESS.md\","
@@ -375,16 +383,22 @@ ar__text_insert_task() {
 }
 
 ar__text_set_field() {
-  # stdin: state content; $1: ws, $2: field, $3: rendered JSON value
+  # stdin: state content; $1: ws, $2: field, $3: rendered JSON value.
+  # Updates the field in place; if the task has no such line yet (e.g. a
+  # field added after the task was created), it is INSERTED just before the
+  # journal, so ar_task_set works for any field — matching the jq/python3
+  # engines. Without this, unknown fields were silently dropped.
   AR_K="    \"$(ar_json_escape "$1")\": {" AR_F="$2" AR_V="$3" awk '
-    BEGIN { key = ENVIRON["AR_K"]; f = ENVIRON["AR_F"]; nv = ENVIRON["AR_V"] }
+    BEGIN { key = ENVIRON["AR_K"]; f = ENVIRON["AR_F"]; nv = ENVIRON["AR_V"]; found = 0 }
     intask && !injournal && index($0, "      \"" f "\":") == 1 {
       comma = ($0 ~ /,$/) ? "," : ""
       print "      \"" f "\": " nv comma
-      intask = 0
-      next
+      found = 1; intask = 0; next
     }
-    intask && index($0, "      \"journal\":") == 1 { injournal = 1 }
+    intask && !injournal && index($0, "      \"journal\":") == 1 {
+      if (!found) { print "      \"" f "\": " nv "," }
+      found = 1; injournal = 1; print; next
+    }
     intask && ($0 == "    }" || $0 == "    },") { intask = 0 }
     $0 == key { intask = 1 }
     { print }
