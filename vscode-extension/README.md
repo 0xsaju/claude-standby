@@ -15,8 +15,8 @@ or parses Claude Code itself.
 - **Full-page dashboard** — clicking the activity-bar logo opens the
   dashboard as an editor tab: a schedule composer for the current
   workspace (which conversation to continue, a resume prompt prefilled to
-  the default, an AM/PM time picker plus Auto-detect / 30m / 1h / 2h,
-  importance tier), a list of scheduled resumes with live countdowns, an
+  the default, an AM/PM time picker plus At reset / Auto-detect / 30m / 1h /
+  2h, importance tier), a list of scheduled resumes with live countdowns, an
   Other-workspaces picker that opens the same composer for any project,
   an activity timeline, a collapsible CLI reference, and an About row.
 - **Exact reset time** — when your live usage data is available locally

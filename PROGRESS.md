@@ -83,6 +83,11 @@ session. Detailed rationale for every decision: `docs/DECISIONS.md`
 
 ## Next
 
+- [x] **Cockpit "At reset" composer option — 2026-07-19.** The dashboard When
+      picker now offers **At reset** (selected by default when a local reset time
+      is known) alongside **Auto-detect** / 30m / 1h / 2h — mapping to the CLI's
+      `resume-at reset` / `auto`. Each mode shows its own hint; the `normal`-tier
+      label now says 5 min. Extension 0.8.8 (vsix rebuilt).
 - [x] **`resume-at reset` + removed the plugin packaging — 2026-07-19 (D32, D33).**
       D32: a `reset` when-keyword for the everyday "I just hit a limit" case —
       schedules a known-time resume to the local `resets_at` + grace (mode=at,

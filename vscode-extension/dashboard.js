@@ -365,9 +365,13 @@ function composerCard(idPrefix, ws, state, primary) {
   const promptVal =
     task && task.resume_prompt_template ? task.resume_prompt_template : DEFAULT_PROMPT;
   const ri = resetInfo(state);
+  const hasReset = !!ri;
+  const resetHint = ri
+    ? `you hit a limit → resume at your exact 5-hour reset, <b>${esc(ri.time)}</b>${esc(ri.pct)} — no probing, you've confirmed the limit`
+    : '';
   const autoHint = ri
-    ? `your 5-hour window resets <b>${esc(ri.time)}</b>${esc(ri.pct)} — if you hit the limit, auto-detect resumes exactly then (no polling)`
-    : "auto-detect checks periodically until the limit lifts, then resumes — it doesn't know your reset time in advance";
+    ? `arm and watch: resume whenever you hit the limit — it'll use your reset time (<b>${esc(ri.time)}</b>) when the moment comes`
+    : "arm and watch: checks periodically until a limit hits and lifts, then resumes — it doesn't know your reset time in advance";
   return `<div class="composer card" data-ws="${esc(ws || '')}" data-pinned="${esc(pinned || '')}" id="${idPrefix}">
     <div class="field">
       <label>Conversation</label>
@@ -384,7 +388,8 @@ function composerCard(idPrefix, ws, state, primary) {
     <div class="field">
       <label>When</label>
       <div class="when-row">
-        <button class="chip selected" data-when="auto">Auto-detect reset</button>
+        ${hasReset ? `<button class="chip selected" data-when="reset">At reset</button>` : ''}
+        <button class="chip${hasReset ? '' : ' selected'}" data-when="auto">Auto-detect</button>
         <button class="chip" data-when="30m">30m</button>
         <button class="chip" data-when="1h">1h</button>
         <button class="chip" data-when="2h">2h</button>
@@ -397,7 +402,8 @@ function composerCard(idPrefix, ws, state, primary) {
           <button class="seg on" data-ap="PM">PM</button>
         </span>
       </div>
-      <div class="when-hint dim">${autoHint}</div>
+      <div class="when-hint dim hint-reset"${hasReset ? '' : ' style="display:none"'}>${resetHint}</div>
+      <div class="when-hint dim hint-auto"${hasReset ? ' style="display:none"' : ''}>${autoHint}</div>
     </div>
     <div class="c-actions">
       <label class="imp-lbl dim">On reset</label>
@@ -408,7 +414,7 @@ function composerCard(idPrefix, ws, state, primary) {
             : ''
         }
         <option value="critical">critical — resume immediately</option>
-        <option value="normal"${task ? '' : ' selected'}>normal — 60 s grace</option>
+        <option value="normal"${task ? '' : ' selected'}>normal — 5 min grace</option>
         <option value="low">low — notify only</option>
       </select>
       <span class="spacer"></span>
@@ -944,19 +950,25 @@ ${body}
     const hour = $('.t-hour', comp);
     const min = $('.t-min', comp);
     const segs = $$('.seg', comp);
-    const hint = $('.when-hint', comp);
+    const hintReset = $('.hint-reset', comp);
+    const hintAuto = $('.hint-auto', comp);
     const prompt = $('.prompt-input', comp);
     const resetBtn = $('.reset-prompt', comp);
 
+    // Each mode shows its own one-line hint; a relative/clock chip shows none.
+    const showHint = (when) => {
+      if (hintReset) hintReset.style.display = when === 'reset' ? '' : 'none';
+      if (hintAuto) hintAuto.style.display = when === 'auto' ? '' : 'none';
+    };
     const selectChip = (c) => {
       chips.forEach((x) => x.classList.toggle('selected', x === c));
       if (whenRow) whenRow.classList.add('chip-active'); // dim the time fields
-      if (hint) hint.style.display = (c && c.dataset.when === 'auto') ? '' : 'none';
+      showHint(c && c.dataset.when);
     };
     const clearChips = () => {
       chips.forEach((x) => x.classList.remove('selected'));
       if (whenRow) whenRow.classList.remove('chip-active');
-      if (hint) hint.style.display = 'none';
+      showHint(null);
     };
     chips.forEach((c) => c.addEventListener('click', () => selectChip(c)));
     [hour, min].forEach((el) => el && el.addEventListener('focus', clearChips));
@@ -967,7 +979,7 @@ ${body}
     // initial state: a chip is preselected server-side, so reflect it.
     const sel0 = $('.chip.selected', comp);
     if (sel0 && whenRow) whenRow.classList.add('chip-active');
-    if (hint) hint.style.display = (sel0 && sel0.dataset.when === 'auto') ? '' : 'none';
+    showHint(sel0 ? sel0.dataset.when : null);
 
     if (prompt && resetBtn) {
       const sync = () => { resetBtn.style.display = (prompt.value.trim() !== DEFAULT_PROMPT) ? '' : 'none'; };

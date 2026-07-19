@@ -4,6 +4,15 @@ All notable changes to the Claude Auto-Resume Cockpit extension. The
 extension is a thin UI over the `claude-auto-resume` terminal tool, so some
 entries describe tool behavior the cockpit now surfaces.
 
+## 0.8.8
+
+- **"At reset" scheduling in the composer.** When your reset time is known
+  locally, the When picker offers **At reset** (selected by default) — "you hit
+  a limit → resume at your exact 5-hour reset," with no probing and no usage
+  guess. **Auto-detect** remains for arming in advance (watch and resume
+  whenever a limit hits). Each mode shows its own one-line hint. Matches the
+  CLI's `resume-at reset`. The tier picker now says the `normal` grace is 5 min.
+
 ## 0.8.7
 
 - **Exact reset time.** When your live usage data is available locally
