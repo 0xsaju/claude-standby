@@ -127,6 +127,7 @@ while :; do
 
   NOW="$(date +%s)"
   if [ "$NOW" -lt "$TARGET" ]; then
+    [ -n "${AR_DAEMON_ONESHOT:-}" ] && stand_down "oneshot: not due yet"
     sleep "$TICK"
     continue
   fi
@@ -136,13 +137,31 @@ while :; do
   # has provably lifted. Probe failures don't count against max_resumes.
   RESUME_MODE="$(ar_task_get "$WS" resume_mode)"
   if [ "$RESUME_MODE" = "auto" ]; then
-    if [ $((NOW - AUTO_START)) -ge "$AUTO_GIVEUP" ]; then
-      ar_task_set "$WS" status failed
-      ar_journal_append "$WS" "failed" "auto mode: limit did not lift within ${AUTO_GIVEUP}s (weekly cap?)"
-      ar_notify "Auto-resume gave up" "Task in $WS: limit still active after $((AUTO_GIVEUP / 3600))h. If this is a weekly cap, schedule manually later."
-      stand_down "auto give-up window exceeded"
+    # A resume must only fire after a limit was actually OBSERVED and then
+    # lifted. Without this, scheduling auto-detect while not currently
+    # limited would make the first probe succeed and resume immediately —
+    # injecting the resume prompt into a live, un-limited session. So we
+    # gate on limit_seen: unset => "armed, waiting for a limit to appear".
+    LIMIT_SEEN="$(ar_task_get "$WS" limit_seen)"
+    # Give up only once a limit was seen but never lifts (measured from
+    # when the limit was first observed, not from daemon start).
+    if [ "$LIMIT_SEEN" = "1" ]; then
+      SEEN_AT="$(ar_task_get "$WS" limit_seen_at)"; SEEN_AT="${SEEN_AT:-$AUTO_START}"
+      if [ $((NOW - SEEN_AT)) -ge "$AUTO_GIVEUP" ]; then
+        ar_task_set "$WS" status failed
+        ar_journal_append "$WS" "failed" "auto mode: limit did not lift within ${AUTO_GIVEUP}s (weekly cap?)"
+        ar_notify "Auto-resume gave up" "Task in $WS: limit still active after $((AUTO_GIVEUP / 3600))h. If this is a weekly cap, schedule manually later."
+        stand_down "auto give-up window exceeded"
+      fi
     fi
     if ! do_probe; then
+      # Limit is active right now — record that we've seen it, so a later
+      # successful probe counts as a real "lifted" and can resume.
+      if [ "$LIMIT_SEEN" != "1" ]; then
+        ar_task_set "$WS" limit_seen 1
+        ar_task_set "$WS" limit_seen_at "$NOW"
+        ar_journal_append "$WS" "limit-hit" "limit detected — waiting for it to reset"
+      fi
       # Best case: the limit message announces the reset time (measured
       # format, HOOK-FINDINGS F1) — wait for exactly that moment instead
       # of blind-polling. Sanity window: >1 min (avoid rescheduling to
@@ -164,6 +183,21 @@ while :; do
         ar_task_set "$WS" resume_at "$NEXT_ISO"
         ar_log "daemon[$$]: probe failed (still limited, no reset time in output); next probe at $NEXT_ISO"
       fi
+      [ -n "${AR_DAEMON_ONESHOT:-}" ] && stand_down "oneshot: probed, still limited"
+      continue
+    fi
+    # Probe succeeded. If we've NEVER seen a limit, this task is armed and
+    # waiting — the current session is fine, so do NOT resume it. Keep
+    # watching so a future limit (and its reset) triggers the resume.
+    if [ "$LIMIT_SEEN" != "1" ]; then
+      NEXT_ISO="$(ar_epoch_to_iso $((NOW + PROBE_INTERVAL)) )"
+      ar_task_set "$WS" resume_at "$NEXT_ISO"
+      if [ "$(ar_task_get "$WS" armed_noted)" != "1" ]; then
+        ar_task_set "$WS" armed_noted 1
+        ar_journal_append "$WS" "armed" "not limited right now — will resume after you hit a limit and it resets"
+      fi
+      ar_log "daemon[$$]: armed (not limited); next check $NEXT_ISO"
+      [ -n "${AR_DAEMON_ONESHOT:-}" ] && stand_down "oneshot: armed, not limited"
       continue
     fi
     ar_journal_append "$WS" "limit-lifted" "probe succeeded — limit has reset"

@@ -33,6 +33,7 @@ const EVENT_GLYPH = {
   scheduled: ['◔', 'yellow'],
   'session-pinned': ['◎', 'desc'],
   'prompt-set': ['✎', 'desc'],
+  armed: ['◇', 'yellow'],
   'limit-hit': ['▲', 'orange'],
   'limit-lifted': ['●', 'green'],
   'reset-detected': ['◑', 'blue'],

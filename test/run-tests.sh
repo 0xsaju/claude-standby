@@ -412,6 +412,37 @@ ar_task_set "$WS11" max_resumes 1
 bash "$PLUGIN/scripts/daemon.sh" "$WS11"
 t_eq "daemon: exit-0 limit bounce ends failed, not done" "failed" "$(ar_task_get "$WS11" status)"
 
+# auto mode: scheduled while NOT limited must NOT resume a live session.
+# (Regression: auto-detect probed, the first probe succeeded because there
+# was no limit, and it resumed the user's active conversation immediately.)
+WS14="$DTMP/ws-auto-armed"; mkdir -p "$WS14"
+printf 'clean' > "$MODEFILE"           # never limited
+(cd "$WS14" && AR_NO_DAEMON=1 bash "$PLUGIN/scripts/task-resume-at.sh" auto critical >/dev/null)
+AR_DAEMON_ONESHOT=1 bash "$PLUGIN/scripts/daemon.sh" "$WS14"
+t_eq   "auto-armed: not limited => stays waiting, no resume" "waiting" "$(ar_task_get "$WS14" status)"
+t_eq   "auto-armed: resume_count stays 0" "0" "$(ar_task_get "$WS14" resume_count)"
+t_contains "auto-armed: journaled as armed" "armed" "$(ar_journal_show "$WS14" 6)"
+# and it must NOT have journaled a resume or a false limit-lifted
+RJ="$(ar_journal_show "$WS14" 8)"
+case "$RJ" in
+  *limit-lifted*|*resumed*) fail "auto-armed: no false limit-lifted/resumed" "$RJ" ;;
+  *) ok "auto-armed: no false limit-lifted/resumed" ;;
+esac
+
+# once a limit IS seen (probe fails), a later clean probe DOES resume
+WS15="$DTMP/ws-auto-armed-then-limit"; mkdir -p "$WS15"
+printf 'limit' > "$MODEFILE"
+(cd "$WS15" && AR_NO_DAEMON=1 bash "$PLUGIN/scripts/task-resume-at.sh" auto critical >/dev/null)
+AR_DAEMON_ONESHOT=1 bash "$PLUGIN/scripts/daemon.sh" "$WS15"   # sees limit, arms
+t_eq "auto-armed: limit observed sets limit_seen" "1" "$(ar_task_get "$WS15" limit_seen)"
+t_eq "auto-armed: still waiting after seeing limit" "waiting" "$(ar_task_get "$WS15" status)"
+printf 'clean' > "$MODEFILE"
+bash "$PLUGIN/scripts/daemon.sh" "$WS15" &                     # limit lifts -> resume
+DPID=$!; WAITED=0
+while kill -0 "$DPID" 2>/dev/null && [ "$WAITED" -lt 15 ]; do sleep 1; WAITED=$((WAITED + 1)); done
+kill "$DPID" 2>/dev/null; wait "$DPID" 2>/dev/null
+t_eq "auto-armed: resumes once the seen limit lifts" "done" "$(ar_task_get "$WS15" status)"
+
 # auto mode: gives up when limit never lifts within the window
 WS9="$DTMP/ws-auto-giveup"; mkdir -p "$WS9"
 printf 'limit' > "$MODEFILE"
