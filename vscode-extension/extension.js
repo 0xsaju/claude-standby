@@ -75,6 +75,68 @@ function runCli(args, cwd) {
   });
 }
 
+// ------------------------------------------------------------- CLI update --
+// The extension never bundles the engine; it only nudges. The one supported
+// update path is the CLI's own `update` (download-validate-swap). Here we just
+// notice when a newer release exists and offer to run it. Network reads are
+// best-effort and silent on failure — a cockpit must never nag when offline.
+
+const LATEST_RELEASE_API =
+  'https://api.github.com/repos/0xsaju/claude-standby/releases/latest';
+
+// Minimal HTTPS GET → parsed JSON, no dependencies. Resolves null on any
+// failure (offline, rate-limited, bad JSON) so callers can no-op quietly.
+function httpsGetJson(url) {
+  return new Promise((resolve) => {
+    let https;
+    try {
+      https = require('https');
+    } catch {
+      return resolve(null);
+    }
+    const req = https.get(
+      url,
+      { headers: { 'User-Agent': 'claude-standby-cockpit', Accept: 'application/vnd.github+json' } },
+      (res) => {
+        if (res.statusCode !== 200) {
+          res.resume();
+          return resolve(null);
+        }
+        let body = '';
+        res.on('data', (c) => (body += c));
+        res.on('end', () => {
+          try {
+            resolve(JSON.parse(body));
+          } catch {
+            resolve(null);
+          }
+        });
+      }
+    );
+    req.on('error', () => resolve(null));
+    req.setTimeout(5000, () => {
+      req.destroy();
+      resolve(null);
+    });
+  });
+}
+
+// Parse a dotted version out of an arbitrary string ("v0.9.1", "claude-standby
+// 0.9.1") → [0,9,1], or null. Returns >0 if a is newer than b, <0 if older.
+function parseVersion(str) {
+  const m = String(str || '').match(/(\d+)\.(\d+)\.(\d+)/);
+  return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
+}
+function compareVersions(a, b) {
+  const va = parseVersion(a);
+  const vb = parseVersion(b);
+  if (!va || !vb) return 0;
+  for (let i = 0; i < 3; i++) {
+    if (va[i] !== vb[i]) return va[i] - vb[i];
+  }
+  return 0;
+}
+
 function readAllTasks() {
   try {
     const state = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
@@ -602,6 +664,49 @@ function installCli() {
   term.sendText(INSTALL_CMD, true);
 }
 
+// Run the CLI's own update in a visible terminal (download-validate-swap).
+function updateCli() {
+  const term = vscode.window.createTerminal('claude-standby update');
+  term.show();
+  term.sendText(`${cliPath()} update`, true);
+}
+
+// Compare the installed CLI version against the latest GitHub release and, if
+// newer, offer a one-click update. `manual` = surfaced from the menu, so it
+// reports "up to date" / failures; the automatic call stays silent otherwise.
+async function checkCliUpdate({ manual = false } = {}) {
+  const probe = await runCli(['version']);
+  if (probe.notFound) {
+    if (manual) return offerInstall();
+    return;
+  }
+  const installed = probe.text; // e.g. "claude-standby 0.9.0"
+  const release = await httpsGetJson(LATEST_RELEASE_API);
+  const latest = release && release.tag_name; // e.g. "v0.9.1"
+  if (!latest) {
+    if (manual) {
+      vscode.window.showWarningMessage(
+        'Could not check for updates (offline or GitHub unreachable).'
+      );
+    }
+    return;
+  }
+  if (compareVersions(latest, installed) > 0) {
+    const shown = parseVersion(latest).join('.');
+    const have = (parseVersion(installed) || []).join('.') || 'unknown';
+    const choice = await vscode.window.showInformationMessage(
+      `claude-standby ${shown} is available (you have ${have}).`,
+      'Update',
+      'Later'
+    );
+    if (choice === 'Update') updateCli();
+  } else if (manual) {
+    vscode.window.showInformationMessage(
+      `claude-standby is up to date (${(parseVersion(installed) || []).join('.')}).`
+    );
+  }
+}
+
 async function offerInstall() {
   const choice = await vscode.window.showInformationMessage(
     'The claude-standby terminal tool is not installed.',
@@ -622,6 +727,7 @@ async function showMenu() {
     { label: '$(output) Open log', act: openLog },
     { label: '$(gear) Open config', act: openConfig },
     { label: '$(cloud-download) Install/reinstall terminal tool', act: installCli },
+    { label: '$(sync) Check for CLI update', act: () => checkCliUpdate({ manual: true }) },
   ];
   const pick = await vscode.window.showQuickPick(items, {
     placeHolder: 'claude-standby',
@@ -659,7 +765,10 @@ async function activate(context) {
     vscode.commands.registerCommand('claudeStandby.refreshView', refreshAll),
     vscode.commands.registerCommand('claudeStandby.openLog', openLog),
     vscode.commands.registerCommand('claudeStandby.openConfig', openConfig),
-    vscode.commands.registerCommand('claudeStandby.installCli', installCli)
+    vscode.commands.registerCommand('claudeStandby.installCli', installCli),
+    vscode.commands.registerCommand('claudeStandby.updateCli', () =>
+      checkCliUpdate({ manual: true })
+    )
   );
 
   refreshAll();
@@ -667,7 +776,16 @@ async function activate(context) {
 
   // Onboarding: offer the one-command install when the CLI is missing.
   const probe = await runCli(['version']);
-  if (probe.notFound) await offerInstall();
+  if (probe.notFound) return offerInstall();
+
+  // Best-effort update check, at most once per 24h so it never nags. Silent
+  // when offline, up to date, or the CLI is absent (handled above).
+  const DAY = 24 * 60 * 60 * 1000;
+  const last = context.globalState.get('lastUpdateCheck', 0);
+  if (Date.now() - last > DAY) {
+    context.globalState.update('lastUpdateCheck', Date.now());
+    checkCliUpdate().catch(() => {});
+  }
 }
 
 function deactivate() {}

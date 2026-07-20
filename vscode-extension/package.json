@@ -2,7 +2,7 @@
   "name": "claude-standby-cockpit",
   "displayName": "Claude Standby Cockpit",
   "description": "Cockpit for claude-standby: auto-resume Claude Code tasks after usage-limit hits. Sidebar dashboard, status bar, one-click controls — the terminal tool does all the work.",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "publisher": "0xsaju",
   "icon": "icon.png",
   "license": "MIT",
@@ -95,6 +95,10 @@
       {
         "command": "claudeStandby.installCli",
         "title": "Claude Standby: Install Terminal Tool"
+      },
+      {
+        "command": "claudeStandby.updateCli",
+        "title": "Claude Standby: Check for CLI Update"
       }
     ],
     "menus": {

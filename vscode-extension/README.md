@@ -37,7 +37,12 @@ or parses Claude Code itself.
   resume interrupted by a dead daemon. Refreshed on state-file changes plus
   a 5-second fallback poll.
 - **Menu / commands** — Schedule Resume, Show Status, Cancel Task, Open
-  Log, Install Terminal Tool.
+  Log, Install Terminal Tool, Check for CLI Update.
+- **Keeps the CLI current** — a quiet once-a-day check compares your
+  installed `claude-standby` against the latest release; when a newer one
+  ships, a notification offers a one-click **Update** (it runs the CLI's own
+  `update`, a download-validate-swap). Silent when offline or up to date; you
+  can also trigger it from the menu ("Check for CLI update") anytime.
 - **About links** — set `claudeStandby.author.github` / `.linkedin` /
   `.buyMeACoffee` in settings; each link shows only when its URL is set.
 
