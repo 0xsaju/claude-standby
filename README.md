@@ -58,26 +58,6 @@ developer job. claude-standby takes the shift for you: one command
 after the limit hits (soon: zero commands), and the task resumes itself
 the moment resuming is possible.
 
-## A related tool
-
-There's an earlier shell utility for the same annoyance,
-[terryso/claude-auto-resume](https://github.com/terryso/claude-auto-resume)
-(this project started under that name too, before the rename). It's a good,
-simpler take: a foreground wrapper that runs Claude, `sleep`s until the
-limit's timestamp, and re-runs. Claude Standby takes a different shape:
-
-- **Detached daemon, not a foreground wrapper** — schedule it and close the
-  terminal; it fires per-workspace and survives laptop suspend.
-- **Exact-reset scheduling with no probe** when your local usage data has
-  the reset time (falls back to a single limit-message probe otherwise).
-- **A VS Code / Cursor cockpit** on top of the CLI.
-- **Safe by default** — permission allowlist, bounded retries, a `normal`
-  tier that gives you a window to object; `--dangerously-skip-permissions`
-  is opt-in, never assumed.
-
-Pick whichever fits — theirs if you want one small script, this if you want
-the daemon + UI + safety rails.
-
 ## Features
 
 | | |
