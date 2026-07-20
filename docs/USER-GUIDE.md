@@ -31,7 +31,7 @@ claude-auto-resume. For design internals, see
 
 ## 2. Installation
 
-**One command** (recommended — installs the repo to `~/.claude-auto-resume`
+**One command** (recommended — installs the tool to `~/.claude-auto-resume`
 and links the CLI into `~/.local/bin`, no root needed):
 
 ```sh

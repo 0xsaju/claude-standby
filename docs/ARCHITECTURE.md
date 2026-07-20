@@ -39,8 +39,8 @@ dropped) — only the status-line stream carries it.
 
 ### Cockpit — VS Code extension (`vscode-extension/`)
 
-A pure UI shell (MVP, run from source): status bar over the state file,
-quick-pick actions, and install onboarding. Reads come from state.json;
+A pure UI shell (published on VS Marketplace + Open VSX): status bar over
+the state file, quick-pick actions, and install onboarding. Reads come from state.json;
 writes go through the CLI (D21). It never spawns or parses Claude Code
 itself.
 

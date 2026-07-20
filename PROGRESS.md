@@ -242,3 +242,12 @@ hint (for pre-D33 plugin users) printed unconditionally, reading as "we
 still ship a plugin." Both uninstall paths now print it only when a trace
 of the old plugin actually exists (Claude Code plugin store config/dirs or
 `enabledPlugins` in settings.json); 254 tests green.
+
+**2026-07-20 — go-live re-audit after D35/D36.** Live end-to-end pass
+against production GitHub: curl install → plain tree (no .git) → `update`
+("Already up to date") → `doctor` all-ok (reads the real rate cache) →
+`uninstall` clean, no legacy-plugin hint. Docs swept for staleness: fixed
+ARCHITECTURE's "MVP, run from source" cockpit line (it's published) and
+USER-GUIDE's "installs the repo" wording; README badge (0.6.0) matches
+VERSION; no remaining git-pull/hook/plugin claims outside historical
+entries. 254 tests green.
