@@ -272,3 +272,29 @@ prompt, stuck detection, resume verification, /warmup) as current. Cosmetic
 rebrand of the status-bar idle label; removed a stale old-named vsix. 259
 tests green. Repo About (description/homepage/topics) set on GitHub. Ready
 for extension republish.
+
+---
+
+## 2026-07-20 — Countable CLI downloads + cockpit auto-update (D39)
+
+Made CLI installs countable and gave the cockpit a way to keep the CLI current.
+`install.sh` now pulls the stable `releases/latest/download/claude-standby.tar.gz`
+asset instead of the uncounted `main` branch archive — GitHub reports
+`download_count` only for uploaded release assets. Public one-liner and the
+`update` path are unchanged; existing users self-heal on their next update
+(first update still goes through their old branch-tarball installer, then every
+update after is counted). Cut the v0.9.0 GitHub Release with the tarball asset;
+`latest/download` resolves 200; counter reads via
+`gh api repos/0xsaju/claude-standby/releases/latest --jq '.assets[0].download_count'`.
+
+Cockpit 0.9.1: a best-effort once-a-day check compares the installed CLI against
+the latest release and offers a one-click **Update** (runs the CLI's own
+download-validate-swap `update`); plus a manual "Check for CLI update" menu item
+/ command. Network reads are dependency-free (node https) and silent on failure.
+Packaged `claude-standby-cockpit-0.9.1.vsix` (38.68 KB) — needs republish to both
+marketplaces. 259 tests green.
+
+Handoff: to publish the cockpit update, run `ovsx publish` (Open VSX) and upload
+the 0.9.1 vsix to VS Marketplace. Operational rule going forward: cut a fresh
+GitHub Release on every user-facing engine change, else `latest/download` lags
+`main` and the cockpit won't see the new version.
