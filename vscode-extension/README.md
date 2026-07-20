@@ -6,6 +6,10 @@ task. All reads come from `~/.claude/auto-resume/state.json`; all writes go
 through the `claude-auto-resume` terminal CLI. The extension never spawns
 or parses Claude Code itself.
 
+![dashboard](https://raw.githubusercontent.com/0xsaju/claude-auto-resume/main/vscode-extension/media/dashboard.png)
+
+![CLI reference](https://raw.githubusercontent.com/0xsaju/claude-auto-resume/main/vscode-extension/media/cli-reference.png)
+
 ## Features
 
 - **Onboarding / setup** — first run opens a setup checklist (terminal CLI

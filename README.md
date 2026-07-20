@@ -39,6 +39,16 @@ $ # …close the laptop lid. Walk away.
   # At reset: desktop notification → YOUR session picks up where it stopped.
 ```
 
+## Screenshots
+
+The VS Code cockpit (it follows your editor theme):
+
+<img src="vscode-extension/media/dashboard.png" alt="dashboard" width="720">
+
+Everything in the panel maps 1:1 to a CLI command — the reference is built in:
+
+<img src="vscode-extension/media/cli-reference.png" alt="CLI reference" width="720">
+
 ## Why
 
 Long agentic tasks regularly outlive a usage window. When the limit hits,
