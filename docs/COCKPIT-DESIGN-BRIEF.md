@@ -1,11 +1,11 @@
-# Design Brief — Claude Auto-Resume for VS Code (single design, all screens)
+# Design Brief — Claude Standby for VS Code (single design, all screens)
 
 Paste this whole document into Claude design. Produce **ONE design** — one
 coherent visual system across three screens — not multiple options.
 
 ## 1. Product context
 
-**claude-auto-resume** rescues developers whose long Claude Code tasks die
+**claude-standby** rescues developers whose long Claude Code tasks die
 when they hit a usage limit. It detects the limit, waits for the reset, and
 resumes the SAME conversation automatically (`claude --resume <session>`).
 This VS Code extension is its cockpit.
@@ -50,7 +50,7 @@ later via a "Setup" link. Two parts:
    ③ your exact conversation continues automatically. One line of caption
    under each.
 2. **Setup checklist** — a card of check rows, each with live status:
-   - Terminal CLI installed (`claude-auto-resume`) — states: checking
+   - Terminal CLI installed (`claude-standby`) — states: checking
      (subtle spinner) / ✓ installed v0.3.0 (green) / ✗ missing + **Install**
      button (runs installer in a terminal)
    - Claude Code CLI found — ✓ v2.1.x / ✗ + doc link
@@ -64,7 +64,7 @@ later via a "Setup" link. Two parts:
 
 Top→bottom:
 
-1. **Header** — small brand mark + "Claude Auto-Resume" + version, right
+1. **Header** — small brand mark + "Claude Standby" + version, right
    side: health dot + "Setup" link + quiet refresh. One line, ~40 px.
 2. **Current workspace section** — header row: folder name +
    muted full path. Contains:
@@ -104,10 +104,10 @@ Top→bottom:
    scheduled → limit-hit → reset-detected → resumed → done.
 5. **CLI reference** — collapsible section ("Do all of this from the
    terminal"), a two-column mini-table in mono font:
-   `claude-auto-resume resume-at` — schedule/reschedule ·
+   `claude-standby resume-at` — schedule/reschedule ·
    `sessions` — list conversations · `status` · `cancel` · `doctor` ·
    `log`. One example line under it:
-   `claude-auto-resume resume-at 8:30pm --session 2 --prompt "…"`.
+   `claude-standby resume-at 8:30pm --session 2 --prompt "…"`.
    Link "Full user guide →".
 6. **About** — one quiet row, author credit: GitHub · LinkedIn ·
    Buy me a coffee (text links with small inline SVG glyphs, no big
@@ -127,7 +127,7 @@ borrow that *style*, fill it with auto-resume data.)
    / `✓ done` / `✗ failed` / `⟳ auto-resume` (idle, nothing scheduled).
 2. **Tool-status popup** (click on the status item; ~320 px card anchored
    above it — VS Code renders this as a rich hover/quick-pick, so design a
-   self-contained card): title row "Claude Auto-Resume · updated 1m ago",
+   self-contained card): title row "Claude Standby · updated 1m ago",
    then for the current workspace:
    - status word + colored dot + tier badge
    - **countdown** `Resumes in 2h 14m` (the star of the card)
@@ -197,7 +197,7 @@ A single self-contained **HTML file** (inline CSS + minimal vanilla JS for
 the countdown, chip behavior, composer reveal, and the dev state
 switcher), using §7 vars for all neutrals, containing Screens A, B, C with
 every state from §6, realistic sample data (workspace
-`~/Documents/claude-auto-resume`, sessions like "Master Prompt — Claude
+`~/Documents/claude-standby`, sessions like "Master Prompt — Claude
 Auto-Resume Project — 612fb08b · 2h ago", the overnight journal). It will
 be dropped into a VS Code webview nearly verbatim — no React, no Tailwind,
 no external assets.

@@ -1,4 +1,4 @@
-// Claude Auto-Resume Cockpit — pure UI over the claude-auto-resume CLI and
+// Claude Standby Cockpit — pure UI over the claude-standby CLI and
 // its state file (~/.claude/auto-resume/state.json). This extension never
 // spawns or parses Claude Code itself (D21): reads come from state.json,
 // writes go through the CLI, so there is exactly one logic path.
@@ -17,10 +17,10 @@ const STATE_FILE = path.join(AR_HOME, 'state.json');
 const LOG_FILE = path.join(AR_HOME, 'logs', 'plugin.log');
 const CONFIG_FILE = path.join(AR_HOME, 'config');
 const INSTALL_CMD =
-  'curl -fsSL https://raw.githubusercontent.com/0xsaju/claude-auto-resume/main/install.sh | bash';
+  'curl -fsSL https://raw.githubusercontent.com/0xsaju/claude-standby/main/install.sh | bash';
 
-const CONFIG_TEMPLATE = `# claude-auto-resume configuration (shell syntax, AR_CFG_* only)
-# Docs: https://github.com/0xsaju/claude-auto-resume/blob/main/docs/USER-GUIDE.md
+const CONFIG_TEMPLATE = `# claude-standby configuration (shell syntax, AR_CFG_* only)
+# Docs: https://github.com/0xsaju/claude-standby/blob/main/docs/USER-GUIDE.md
 #
 # Extra CLI args for headless resumes (e.g. a permission allowlist):
 #AR_CFG_EXTRA_ARGS="--allowedTools Edit,Read,Bash(npm:*)"
@@ -49,13 +49,13 @@ function workspacePath() {
 
 function cliPath() {
   const configured = vscode.workspace
-    .getConfiguration('claudeAutoResume')
+    .getConfiguration('claudeStandby')
     .get('cliPath');
   if (configured) return configured;
   // GUI-launched VS Code often lacks ~/.local/bin on PATH — check directly.
-  const local = path.join(os.homedir(), '.local', 'bin', 'claude-auto-resume');
+  const local = path.join(os.homedir(), '.local', 'bin', 'claude-standby');
   if (fs.existsSync(local)) return local;
-  return 'claude-auto-resume';
+  return 'claude-standby';
 }
 
 function runCli(args, cwd) {
@@ -97,7 +97,7 @@ function readTask() {
 // disagree about whether a reset time exists: env override, then the config's
 // AR_CFG_RATE_SOURCE, then our rate.json, then a common /tmp cache.
 function rateSourceOverride() {
-  if (process.env.CLAUDE_AUTO_RESUME_RATE_FILE) return process.env.CLAUDE_AUTO_RESUME_RATE_FILE;
+  if (process.env.CLAUDE_STANDBY_RATE_FILE) return process.env.CLAUDE_STANDBY_RATE_FILE;
   try {
     const cfg = fs.readFileSync(path.join(AR_HOME, 'config'), 'utf8');
     const m = cfg.match(/^\s*AR_CFG_RATE_SOURCE\s*=\s*["']?([^"'#\n]+?)["']?\s*$/m);
@@ -328,7 +328,7 @@ function collectState() {
   const projects = listProjects(currentWs);
   const sessionsByWs = {};
   for (const ws of projects) sessionsByWs[ws] = listSessions(ws);
-  const cfg = vscode.workspace.getConfiguration('claudeAutoResume');
+  const cfg = vscode.workspace.getConfiguration('claudeStandby');
   const author = {
     name: cfg.get('author.name') || '',
     github: cfg.get('author.github') || '',
@@ -452,13 +452,13 @@ function statusTooltip(task) {
   const md = new vscode.MarkdownString();
   md.isTrusted = true;
   md.supportThemeIcons = true;
-  md.appendMarkdown('**Claude Auto-Resume**\n\n');
+  md.appendMarkdown('**Claude Standby**\n\n');
   if (!task) {
     md.appendMarkdown('Nothing scheduled in this workspace.\n\n');
     md.appendMarkdown(
       'Hit a limit and it shows up here — or schedule one yourself.\n\n'
     );
-    md.appendMarkdown('[Open dashboard](command:claudeAutoResume.openDashboard)');
+    md.appendMarkdown('[Open dashboard](command:claudeStandby.openDashboard)');
     return md;
   }
   const wordMap = {
@@ -479,8 +479,8 @@ function statusTooltip(task) {
         'again, or cancel to clear it.\n\n'
     );
     md.appendMarkdown(
-      '[Reschedule](command:claudeAutoResume.scheduleResume) · ' +
-        '[Cancel](command:claudeAutoResume.cancel)'
+      '[Reschedule](command:claudeStandby.scheduleResume) · ' +
+        '[Cancel](command:claudeStandby.cancel)'
     );
     return md;
   }
@@ -504,8 +504,8 @@ function statusTooltip(task) {
     `Attempt ${task.resume_count ?? 0} / ${task.max_resumes ?? 3}\n\n`
   );
   md.appendMarkdown(
-    '[Open dashboard](command:claudeAutoResume.openDashboard) · ' +
-      '[Cancel](command:claudeAutoResume.cancel)'
+    '[Open dashboard](command:claudeStandby.openDashboard) · ' +
+      '[Cancel](command:claudeStandby.cancel)'
   );
   return md;
 }
@@ -580,7 +580,7 @@ async function cancelTask(item) {
 
 async function openLog() {
   if (!fs.existsSync(LOG_FILE)) {
-    vscode.window.showInformationMessage('No claude-auto-resume log yet.');
+    vscode.window.showInformationMessage('No claude-standby log yet.');
     return;
   }
   const doc = await vscode.workspace.openTextDocument(LOG_FILE);
@@ -597,14 +597,14 @@ async function openConfig() {
 }
 
 function installCli() {
-  const term = vscode.window.createTerminal('claude-auto-resume install');
+  const term = vscode.window.createTerminal('claude-standby install');
   term.show();
   term.sendText(INSTALL_CMD, true);
 }
 
 async function offerInstall() {
   const choice = await vscode.window.showInformationMessage(
-    'The claude-auto-resume terminal tool is not installed.',
+    'The claude-standby terminal tool is not installed.',
     'Install in Terminal',
     'Later'
   );
@@ -624,7 +624,7 @@ async function showMenu() {
     { label: '$(cloud-download) Install/reinstall terminal tool', act: installCli },
   ];
   const pick = await vscode.window.showQuickPick(items, {
-    placeHolder: 'claude-auto-resume',
+    placeHolder: 'claude-standby',
   });
   if (pick) await pick.act();
 }
@@ -632,34 +632,34 @@ async function showMenu() {
 // --------------------------------------------------------------- lifecycle --
 
 async function activate(context) {
-  output = vscode.window.createOutputChannel('Claude Auto-Resume');
+  output = vscode.window.createOutputChannel('Claude Standby');
   statusItem = vscode.window.createStatusBarItem(
     vscode.StatusBarAlignment.Left,
     50
   );
-  statusItem.command = 'claudeAutoResume.openDashboard';
+  statusItem.command = 'claudeStandby.openDashboard';
   statusItem.show();
   context.subscriptions.push(output, statusItem);
 
   // Sidebar = the dashboard itself (clicking the activity-bar logo opens it).
   context.subscriptions.push(
-    vscode.window.registerWebviewViewProvider('claudeAutoResume.dashboardView', {
+    vscode.window.registerWebviewViewProvider('claudeStandby.dashboardView', {
       resolveWebviewView: (view) => dashboard.resolveSidebar(view, host),
     })
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('claudeAutoResume.openDashboard', () =>
+    vscode.commands.registerCommand('claudeStandby.openDashboard', () =>
       dashboard.createOrShow(context, host)
     ),
-    vscode.commands.registerCommand('claudeAutoResume.menu', showMenu),
-    vscode.commands.registerCommand('claudeAutoResume.status', showStatus),
-    vscode.commands.registerCommand('claudeAutoResume.scheduleResume', scheduleResume),
-    vscode.commands.registerCommand('claudeAutoResume.cancel', cancelTask),
-    vscode.commands.registerCommand('claudeAutoResume.refreshView', refreshAll),
-    vscode.commands.registerCommand('claudeAutoResume.openLog', openLog),
-    vscode.commands.registerCommand('claudeAutoResume.openConfig', openConfig),
-    vscode.commands.registerCommand('claudeAutoResume.installCli', installCli)
+    vscode.commands.registerCommand('claudeStandby.menu', showMenu),
+    vscode.commands.registerCommand('claudeStandby.status', showStatus),
+    vscode.commands.registerCommand('claudeStandby.scheduleResume', scheduleResume),
+    vscode.commands.registerCommand('claudeStandby.cancel', cancelTask),
+    vscode.commands.registerCommand('claudeStandby.refreshView', refreshAll),
+    vscode.commands.registerCommand('claudeStandby.openLog', openLog),
+    vscode.commands.registerCommand('claudeStandby.openConfig', openConfig),
+    vscode.commands.registerCommand('claudeStandby.installCli', installCli)
   );
 
   refreshAll();

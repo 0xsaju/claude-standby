@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# claude-auto-resume — survive Claude Code usage limits: wait for the reset,
+# claude-standby — survive Claude Code usage limits: wait for the reset,
 # then resume the same conversation. Zero tokens; runs even while you're limited.
 #
-# Usage:  claude-auto-resume <command> [options]          (tip: alias car=…)
+# Usage:  claude-standby <command> [options]          (tip: alias cs=…)
 #
 # After you hit a limit (run from your project directory):
 #   resume-at reset                  resume at your 5-hour reset — exact, no probe
@@ -37,15 +37,15 @@ done
 SELF_DIR="$(cd "$(dirname "$SELF")" && pwd)"
 ROOT="$(cd "$SELF_DIR/.." && pwd)"
 
-SCRIPTS_DIR="${CLAUDE_AUTO_RESUME_PLUGIN_DIR:-$ROOT/plugin}/scripts"
+SCRIPTS_DIR="${CLAUDE_STANDBY_PLUGIN_DIR:-$ROOT/plugin}/scripts"
 if [ ! -f "$SCRIPTS_DIR/lib.sh" ]; then
-  echo "claude-auto-resume: plugin scripts not found at $SCRIPTS_DIR"
-  echo "Set CLAUDE_AUTO_RESUME_PLUGIN_DIR to the plugin directory."
+  echo "claude-standby: plugin scripts not found at $SCRIPTS_DIR"
+  echo "Set CLAUDE_STANDBY_PLUGIN_DIR to the plugin directory."
   exit 1
 fi
 
-LOG_FILE="${CLAUDE_AUTO_RESUME_LOG_DIR:-$HOME/.claude/auto-resume/logs}/plugin.log"
-INSTALL_URL="https://raw.githubusercontent.com/0xsaju/claude-auto-resume/main/install.sh"
+LOG_FILE="${CLAUDE_STANDBY_LOG_DIR:-$HOME/.claude/auto-resume/logs}/plugin.log"
+INSTALL_URL="https://raw.githubusercontent.com/0xsaju/claude-standby/main/install.sh"
 
 usage() {
   # Print the header comment block (from line 4) up to the first non-comment.
@@ -65,9 +65,9 @@ car_gitrev() {
 # pre-removal users who still have a trace of it.
 car_had_legacy_plugin() {
   P="${CLAUDE_PLUGINS_DIR:-$HOME/.claude/plugins}"
-  grep -qs "claude-auto-resume" "$P/config.json" 2>/dev/null && return 0
+  grep -qs "claude-standby" "$P/config.json" 2>/dev/null && return 0
   grep -qs "claude-auto-resume@auto-resume" "${CLAUDE_SETTINGS_FILE:-$HOME/.claude/settings.json}" 2>/dev/null && return 0
-  [ -n "$(find "$P" -maxdepth 3 -name 'claude-auto-resume*' -print 2>/dev/null | head -1)" ]
+  [ -n "$(find "$P" -maxdepth 3 -name 'claude-standby*' -print 2>/dev/null | head -1)" ]
 }
 
 CMD="${1:-status}"
@@ -122,9 +122,9 @@ EOF
     . "$SCRIPTS_DIR/lib.sh" || { echo "broken install: cannot load lib.sh"; exit 1; }
     RC=0
     REV="$(car_gitrev)"
-    echo "claude-auto-resume $(car_version)${REV:+ ($REV)}"
+    echo "claude-standby $(car_version)${REV:+ ($REV)}"
     printf '  %-8s %-5s %s\n' "install" "ok" "$ROOT"
-    CB="${CLAUDE_AUTO_RESUME_CLAUDE_BIN:-${AR_CFG_CLAUDE_BIN:-claude}}"
+    CB="${CLAUDE_STANDBY_CLAUDE_BIN:-${AR_CFG_CLAUDE_BIN:-claude}}"
     if command -v "$CB" >/dev/null 2>&1; then
       printf '  %-8s %-5s %s\n' "claude" "ok" "$(command -v "$CB")"
     else
@@ -173,7 +173,7 @@ EOF
     # Updates are download-validate-swap via the installer (D36) — never
     # `git pull` into the live tree. A git checkout outside the managed
     # install dir is a development copy: hands off.
-    MANAGED_DIR="${CAR_INSTALL_DIR:-$HOME/.claude-auto-resume}"
+    MANAGED_DIR="${CAR_INSTALL_DIR:-$HOME/.claude-standby}"
     if [ "$ROOT" != "$MANAGED_DIR" ] && [ -d "$ROOT/.git" ]; then
       echo "This is a development checkout — update it with git:"
       echo "  git -C \"$ROOT\" pull"
@@ -192,7 +192,7 @@ EOF
     # (filemode/CRLF quirks can dirty an installed clone through no fault
     # of the user's).
     DIRTY="$(git -C "$ROOT" status --porcelain 2>/dev/null || true)"
-    MANAGED_DIR="${CAR_INSTALL_DIR:-$HOME/.claude-auto-resume}"
+    MANAGED_DIR="${CAR_INSTALL_DIR:-$HOME/.claude-standby}"
     if [ -n "$DIRTY" ] && [ "$ROOT" != "$MANAGED_DIR" ]; then
       echo "Refusing: $ROOT has uncommitted changes — this looks like a development checkout."
       echo "If it really is an installed copy, remove it with:"
@@ -204,14 +204,14 @@ EOF
       printf 'Remove %s and its CLI link? [y/N] ' "$ROOT"
       if ! read -r ANS </dev/tty 2>/dev/null; then
         echo ""
-        echo "No terminal for confirmation — run: claude-auto-resume uninstall --yes"
+        echo "No terminal for confirmation — run: claude-standby uninstall --yes"
         exit 1
       fi
       case "$ANS" in y|Y|yes|YES) ;; *) echo "Aborted."; exit 0 ;; esac
     fi
     bash "$SCRIPTS_DIR/setup-statusline.sh" remove 2>/dev/null | grep -v "nothing to remove" || true
     [ -L "$ORIG0" ] && rm -f "$ORIG0"
-    FOUND_LINK="$(command -v claude-auto-resume 2>/dev/null || true)"
+    FOUND_LINK="$(command -v claude-standby 2>/dev/null || true)"
     if [ -n "$FOUND_LINK" ] && [ -L "$FOUND_LINK" ]; then
       case "$(readlink "$FOUND_LINK")" in
         "$ROOT"*) rm -f "$FOUND_LINK" ;;
@@ -229,7 +229,7 @@ EOF
 
   version|--version|-V)
     REV="$(car_gitrev)"
-    echo "claude-auto-resume $(car_version)${REV:+ ($REV)}"
+    echo "claude-standby $(car_version)${REV:+ ($REV)}"
     exit 0 ;;
 
   help|-h|--help)
@@ -237,7 +237,7 @@ EOF
     exit 0 ;;
 
   *)
-    echo "claude-auto-resume: unknown command '$CMD'"
+    echo "claude-standby: unknown command '$CMD'"
     echo
     usage
     exit 1 ;;

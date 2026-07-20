@@ -1,14 +1,14 @@
-# Claude Auto-Resume Cockpit (VS Code)
+# Claude Standby Cockpit (VS Code)
 
-Pure UI over [claude-auto-resume](https://github.com/0xsaju/claude-auto-resume):
+Pure UI over [claude-standby](https://github.com/0xsaju/claude-standby):
 a status bar item and a small action menu for the workspace's auto-resume
 task. All reads come from `~/.claude/auto-resume/state.json`; all writes go
-through the `claude-auto-resume` terminal CLI. The extension never spawns
+through the `claude-standby` terminal CLI. The extension never spawns
 or parses Claude Code itself.
 
-![dashboard](https://raw.githubusercontent.com/0xsaju/claude-auto-resume/main/vscode-extension/media/dashboard.png)
+![dashboard](https://raw.githubusercontent.com/0xsaju/claude-standby/main/vscode-extension/media/dashboard.png)
 
-![CLI reference](https://raw.githubusercontent.com/0xsaju/claude-auto-resume/main/vscode-extension/media/cli-reference.png)
+![CLI reference](https://raw.githubusercontent.com/0xsaju/claude-standby/main/vscode-extension/media/cli-reference.png)
 
 ## Features
 
@@ -27,7 +27,7 @@ or parses Claude Code itself.
   (streamed to Claude Code's status line), the dashboard and status bar show
   the real reset moment and usage (`resets 6:00 PM · 54% used`) instead of a
   guess, and auto-detect schedules to it. Works with zero setup when a cache
-  already exists; otherwise `claude-auto-resume setup-statusline` adds a tiny
+  already exists; otherwise `claude-standby setup-statusline` adds a tiny
   sensor. The resume fires a short safety buffer after the reset, not on the
   exact instant.
 - **Status bar** — the tool's live state for the open workspace
@@ -38,21 +38,21 @@ or parses Claude Code itself.
   a 5-second fallback poll.
 - **Menu / commands** — Schedule Resume, Show Status, Cancel Task, Open
   Log, Install Terminal Tool.
-- **About links** — set `claudeAutoResume.author.github` / `.linkedin` /
+- **About links** — set `claudeStandby.author.github` / `.linkedin` /
   `.buyMeACoffee` in settings; each link shows only when its URL is set.
 
 ## Requirements
 
 - VS Code 1.85+
-- The `claude-auto-resume` terminal tool (the extension offers to install
+- The `claude-standby` terminal tool (the extension offers to install
   it on first activation). Auto-detected from PATH or `~/.local/bin`;
-  override with the `claudeAutoResume.cliPath` setting.
+  override with the `claudeStandby.cliPath` setting.
 
 ## Install
 
-- **From the Marketplace** — search "Claude Auto-Resume" in the Extensions
+- **From the Marketplace** — search "Claude Standby" in the Extensions
   view, or install the packaged `.vsix` via "Extensions: Install from
-  VSIX…". The extension drives the `claude-auto-resume` terminal tool, so
+  VSIX…". The extension drives the `claude-standby` terminal tool, so
   install that too (the extension offers to on first run, or run the
   one-line installer from the main repo).
 

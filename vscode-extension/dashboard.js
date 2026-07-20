@@ -1,4 +1,4 @@
-// Dashboard webview for Claude Auto-Resume Cockpit.
+// Dashboard webview for Claude Standby Cockpit.
 // Pure presentation: receives a state snapshot from extension.js, renders
 // the page, and posts user intents back — all writes still go through the
 // CLI. Visual direction: the Claude-design "Auto-Resume.dc.html" — an
@@ -118,7 +118,7 @@ function attach(webview, host) {
         _cliOpen = Boolean(msg.open);
         break;
       case 'openFull':
-        vscode.commands.executeCommand('claudeAutoResume.openDashboard');
+        vscode.commands.executeCommand('claudeStandby.openDashboard');
         break;
     }
   });
@@ -130,8 +130,8 @@ function createOrShow(context, host) {
     return panel;
   }
   panel = vscode.window.createWebviewPanel(
-    'claudeAutoResume.dashboard',
-    'Claude Auto-Resume',
+    'claudeStandby.dashboard',
+    'Claude Standby',
     vscode.ViewColumn.One,
     { enableScripts: true, retainContextWhenHidden: true }
   );
@@ -181,7 +181,7 @@ function resolveSidebar(webviewView, host) {
 </body></html>`;
 
   const openFull = () => {
-    vscode.commands.executeCommand('claudeAutoResume.openDashboard');
+    vscode.commands.executeCommand('claudeStandby.openDashboard');
     vscode.commands.executeCommand('workbench.action.closeSidebar');
   };
   webviewView.onDidChangeVisibility(() => {
@@ -314,7 +314,7 @@ function setupScreen(state) {
   return `<div class="scr scr-setup">
     <div class="brandline">
       ${BRAND_SVG}
-      <span class="name">Claude Auto-Resume</span>
+      <span class="name">Claude Standby</span>
       <span class="dim ver">v${esc(state.extVersion || '')}</span>
     </div>
     <p class="lead">When a Claude Code task dies on a usage limit, this tool
@@ -338,7 +338,7 @@ function setupScreen(state) {
 
     <h3 class="section-title">Setup checklist</h3>
     <div class="checklist">
-      ${setupRow(cliOk, 'Terminal CLI installed', 'claude-auto-resume', cliOk ? 'installed' : 'install')}
+      ${setupRow(cliOk, 'Terminal CLI installed', 'claude-standby', cliOk ? 'installed' : 'install')}
       ${setupRow(claudeOk, 'Claude Code detected', '~/.claude', claudeOk ? 'found' : '')}
       ${setupRow(stateOk, 'State file', '~/.claude/auto-resume/state.json', stateOk ? 'healthy' : '', statePending, 'created on first schedule')}
     </div>
@@ -560,12 +560,12 @@ function timelineSection(state, ws) {
 
 function cliReference() {
   const cmds = [
-    ['claude-auto-resume resume-at', 'schedule or reschedule a resume'],
-    ['claude-auto-resume sessions', 'list conversations in this project'],
-    ['claude-auto-resume status', "what's scheduled, everywhere"],
-    ['claude-auto-resume cancel', 'cancel a scheduled resume'],
-    ['claude-auto-resume doctor', 'check CLI, daemon, and reset detection'],
-    ['claude-auto-resume log', 'tail the journal'],
+    ['claude-standby resume-at', 'schedule or reschedule a resume'],
+    ['claude-standby sessions', 'list conversations in this project'],
+    ['claude-standby status', "what's scheduled, everywhere"],
+    ['claude-standby cancel', 'cancel a scheduled resume'],
+    ['claude-standby doctor', 'check CLI, daemon, and reset detection'],
+    ['claude-standby log', 'tail the journal'],
   ];
   const grid = cmds
     .map(
@@ -576,12 +576,12 @@ function cliReference() {
   return `<details class="cli-ref" ${_cliOpen ? 'open' : ''}>
     <summary>Do all of this from the terminal</summary>
     <div class="cli-grid">${grid}</div>
-    <div class="cli-eg mono">$ claude-auto-resume resume-at 8:30pm --session 2 --prompt "Limit reset. Continue…"</div>
-    <div class="cli-guide"><a href="https://github.com/0xsaju/claude-auto-resume/blob/main/docs/USER-GUIDE.md">Full user guide →</a></div>
+    <div class="cli-eg mono">$ claude-standby resume-at 8:30pm --session 2 --prompt "Limit reset. Continue…"</div>
+    <div class="cli-guide"><a href="https://github.com/0xsaju/claude-standby/blob/main/docs/USER-GUIDE.md">Full user guide →</a></div>
   </details>`;
 }
 
-const REPO_URL = 'https://github.com/0xsaju/claude-auto-resume';
+const REPO_URL = 'https://github.com/0xsaju/claude-standby';
 
 function aboutRow(state) {
   const a = state.author || {};
@@ -594,7 +594,7 @@ function aboutRow(state) {
     links.push(`<a href="${esc(a.buyMeACoffee)}">${ICON_COFFEE}Buy me a coffee</a>`);
   return `<section class="support">
     <div class="support-text">
-      <span class="support-title">${STAR} Enjoying Claude Auto-Resume?</span>
+      <span class="support-title">${STAR} Enjoying Claude Standby?</span>
       <span class="dim">It's free and open source. A star helps other people find it.</span>
     </div>
     <a class="star-btn" href="${REPO_URL}">${STAR} Star on GitHub</a>
@@ -631,7 +631,7 @@ function dashboardScreen(state) {
   return `<div class="scr scr-dash">
     <header class="top">
       ${BRAND_SVG}
-      <span class="name">Claude Auto-Resume</span>
+      <span class="name">Claude Standby</span>
       <span class="dim ver">v${esc(state.extVersion || '')}</span>
       <span class="spacer"></span>
       <span class="health" title="CLI ${state.cliFound ? 'found' : 'missing'} · ${state.daemons} daemon(s)">

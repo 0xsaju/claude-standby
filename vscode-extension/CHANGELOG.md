@@ -1,7 +1,7 @@
 # Changelog
 
-All notable changes to the Claude Auto-Resume Cockpit extension. The
-extension is a thin UI over the `claude-auto-resume` terminal tool, so some
+All notable changes to the Claude Standby Cockpit extension. The
+extension is a thin UI over the `claude-standby` terminal tool, so some
 entries describe tool behavior the cockpit now surfaces.
 
 ## 0.8.9
@@ -20,7 +20,7 @@ entries describe tool behavior the cockpit now surfaces.
   guess. **Auto-detect** remains for arming in advance (watch and resume
   whenever a limit hits). Each mode shows its own one-line hint. Matches the
   CLI's `resume-at reset`. The tier picker now says the `normal` grace is 5 min.
-- The reset-time reader now honors `CLAUDE_AUTO_RESUME_RATE_FILE` and
+- The reset-time reader now honors `CLAUDE_STANDBY_RATE_FILE` and
   `AR_CFG_RATE_SOURCE` (matching the CLI), so "At reset" and the CLI never
   disagree about whether a reset time exists.
 
@@ -31,7 +31,7 @@ entries describe tool behavior the cockpit now surfaces.
   dashboard and status bar show the real reset moment and usage
   (`resets 6:00 PM · 54% used`) and auto-detect schedules to it — no polling,
   no quota. Zero setup when a cache exists; otherwise
-  `claude-auto-resume setup-statusline` adds a small sensor.
+  `claude-standby setup-statusline` adds a small sensor.
 - **Honest auto-detect countdown.** Armed auto-detect tasks now show
   `armed · resets 6:00 PM` (or the real next-check), replacing a misleading
   fixed countdown and the false "no quota" copy.

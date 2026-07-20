@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# task-cancel.sh — backend for `claude-auto-resume cancel`
+# task-cancel.sh — backend for `claude-standby cancel`
 # Sets status=cancelled; the (future) daemon reads state before every action
 # and stands down on cancelled, so no direct signaling is needed.
 set -u

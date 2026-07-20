@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# statusline.sh — status-line SENSOR for claude-auto-resume.
+# statusline.sh — status-line SENSOR for claude-standby.
 #
 # Claude Code streams live rate-limit state to the status-line command on
 # stdin (HOOK-FINDINGS F4): .rate_limits.five_hour.{used_percentage,resets_at}.

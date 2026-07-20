@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# task-start.sh — backend for `claude-auto-resume start`
+# task-start.sh — backend for `claude-standby start`
 # Prints a human-readable result; exits 0 even on user error.
 set -u
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "$SCRIPT_DIR/lib.sh" || { echo "auto-resume: failed to load lib.sh"; exit 0; }
 
-USAGE="Usage: claude-auto-resume start <critical|normal|low> <task description>"
+USAGE="Usage: claude-standby start <critical|normal|low> <task description>"
 
 IMPORTANCE="${1:-}"
 if [ $# -gt 0 ]; then shift; fi

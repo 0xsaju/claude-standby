@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# lib.sh — claude-auto-resume core helpers: state.json access, logging,
+# lib.sh — claude-standby core helpers: state.json access, logging,
 # notifications, timestamps. Sourced by every plugin script.
 #
 # Portability (C2): runs on macOS (BSD userland) and Linux (GNU).
@@ -13,17 +13,17 @@
 
 # ----------------------------------------------------------------- paths --
 
-AR_STATE_FILE="${CLAUDE_AUTO_RESUME_STATE:-$HOME/.claude/auto-resume/state.json}"
+AR_STATE_FILE="${CLAUDE_STANDBY_STATE:-$HOME/.claude/auto-resume/state.json}"
 AR_HOME="$(dirname "$AR_STATE_FILE")"
-AR_LOG_DIR="${CLAUDE_AUTO_RESUME_LOG_DIR:-$AR_HOME/logs}"
+AR_LOG_DIR="${CLAUDE_STANDBY_LOG_DIR:-$AR_HOME/logs}"
 # Rate-limit snapshot written by the status-line sensor (HOOK-FINDINGS F4):
 # { captured_at, resets_at (epoch), used_percentage }.
-AR_RATE_FILE="${CLAUDE_AUTO_RESUME_RATE_FILE:-$AR_HOME/rate.json}"
+AR_RATE_FILE="${CLAUDE_STANDBY_RATE_FILE:-$AR_HOME/rate.json}"
 
 # Optional user config (shell syntax, AR_CFG_* variables only — see
 # docs/USER-GUIDE.md). Environment variables always win over config values
-# because consumers read ${CLAUDE_AUTO_RESUME_X:-${AR_CFG_X:-default}}.
-AR_CONFIG_FILE="${CLAUDE_AUTO_RESUME_CONFIG:-$AR_HOME/config}"
+# because consumers read ${CLAUDE_STANDBY_X:-${AR_CFG_X:-default}}.
+AR_CONFIG_FILE="${CLAUDE_STANDBY_CONFIG:-$AR_HOME/config}"
 if [ -f "$AR_CONFIG_FILE" ]; then
   # shellcheck disable=SC1090
   . "$AR_CONFIG_FILE" 2>/dev/null || true
@@ -650,7 +650,7 @@ ar_rate_file() {
   #   2. our sensor's output, if registered
   #   3. a common status-line cache already on disk (read-only)
   local common
-  if [ -n "${CLAUDE_AUTO_RESUME_RATE_FILE:-}" ]; then printf '%s\n' "$CLAUDE_AUTO_RESUME_RATE_FILE"; return 0; fi
+  if [ -n "${CLAUDE_STANDBY_RATE_FILE:-}" ]; then printf '%s\n' "$CLAUDE_STANDBY_RATE_FILE"; return 0; fi
   if [ -n "${AR_CFG_RATE_SOURCE:-}" ] && [ -f "$AR_CFG_RATE_SOURCE" ]; then printf '%s\n' "$AR_CFG_RATE_SOURCE"; return 0; fi
   if [ -f "$AR_HOME/rate.json" ]; then printf '%s\n' "$AR_HOME/rate.json"; return 0; fi
   common="/tmp/claude_rate_cache_${USER:-$(id -un 2>/dev/null)}.json"

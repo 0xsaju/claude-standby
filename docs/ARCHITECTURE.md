@@ -3,7 +3,7 @@
 ## Problem
 
 Developers running long agentic Claude Code tasks hit usage limits mid-task
-and must babysit the terminal waiting for reset. claude-auto-resume removes
+and must babysit the terminal waiting for reset. claude-standby removes
 the babysitting: it detects the limit hit, waits until the reset time, and
 resumes the same session with proper context — with behavior graded by task
 importance.
@@ -15,7 +15,7 @@ importance.
 All the logic: state access (lib.sh), the wait-and-resume daemon, the
 task commands. Editor-agnostic plain bash.
 
-### Control surface — terminal CLI (`bin/claude-auto-resume`)
+### Control surface — terminal CLI (`bin/claude-standby`)
 
 The primary interface (D15/D17): a thin dispatcher over the engine
 scripts. Zero token cost, and works while rate-limited — when nothing
@@ -31,7 +31,7 @@ Opt-in via `setup-statusline`, which **chains** (never clobbers) any
 existing status line. The daemon also reads a pre-existing cache when one
 is present (e.g. `/tmp/claude_rate_cache_$USER.json`), so many setups get
 exact-reset detection with zero setup. Resolution order:
-`CLAUDE_AUTO_RESUME_RATE_FILE` → `AR_CFG_RATE_SOURCE` → our `rate.json` →
+`CLAUDE_STANDBY_RATE_FILE` → `AR_CFG_RATE_SOURCE` → our `rate.json` →
 the common `/tmp` cache. With no snapshot at all, auto mode falls back to
 the `haiku` probe path. Note: this reset time is **not** in any Stop/
 SessionEnd hook payload (F4 measured that; it's why the hook path was
@@ -86,7 +86,7 @@ Schema changes require a `version` bump and an entry in `docs/DECISIONS.md`.
 
 Field notes:
 
-- **workspace key** — the absolute working directory at `claude-auto-resume start` time;
+- **workspace key** — the absolute working directory at `claude-standby start` time;
   one tracked task per workspace (see DECISIONS D3).
 - **session_id** — the conversation to continue, discovered from the
   session store (HOOK-FINDINGS F2) and pinned at schedule time so the
@@ -109,10 +109,10 @@ The daemon doesn't care *who* decided a resume is needed — it only reads
 state. Two things write that state:
 
 1. **Manual scheduling (D10):** the user saw the limit message and runs
-   `claude-auto-resume resume-at <when>`. The command sets `status=waiting`
+   `claude-standby resume-at <when>`. The command sets `status=waiting`
    + `resume_at` and spawns the daemon. No detection involved; the human is
    the detector.
-2. **Auto detection (D13/D29):** `claude-auto-resume resume-at` with no
+2. **Auto detection (D13/D29):** `claude-standby resume-at` with no
    time. The daemon knows the exact reset time from a local rate snapshot
    (HOOK-FINDINGS F4) and waits for it — zero probe cost; or, with no
    snapshot, it falls back to a minimal `claude -p "ok" --model haiku` probe
@@ -124,7 +124,7 @@ decouples them.
 
 ## Lifecycle loop
 
-1. You hit a limit and run `claude-auto-resume resume-at` (auto), or
+1. You hit a limit and run `claude-standby resume-at` (auto), or
    `resume-at <when>` for a known time. The command writes resume state
    (`status=waiting`, `resume_at`, the pinned `session_id`) and spawns a
    detached daemon (`nohup ... & disown`).

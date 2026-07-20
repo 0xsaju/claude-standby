@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# task-resume-at.sh — backend for `claude-auto-resume resume-at`
+# task-resume-at.sh — backend for `claude-standby resume-at`
 #
 # Post-limit scheduling: run this AFTER a limit already hit. No detection
 # is needed — you read the reset time off the limit message yourself, and
@@ -10,7 +10,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck disable=SC1091
 . "$SCRIPT_DIR/lib.sh" || { echo "auto-resume: failed to load lib.sh"; exit 0; }
 
-USAGE='Usage: claude-auto-resume resume-at [when] [critical|normal|low]
+USAGE='Usage: claude-standby resume-at [when] [critical|normal|low]
          [--session <n|id|latest|new>] [--prompt "<text>"] [--workspace <path>]
   [when] accepts:
     reset                      you just hit a limit: resume at the reset time
@@ -22,7 +22,7 @@ USAGE='Usage: claude-auto-resume resume-at [when] [critical|normal|low]
     20:00                      clock time (next occurrence)
     2h30m | 45m | 3h           relative from now
     now                        immediately
-  --session picks WHICH conversation to continue (see: claude-auto-resume
+  --session picks WHICH conversation to continue (see: claude-standby
   sessions). Default: the newest session in the workspace; "new" starts a
   fresh one.
   --prompt sets the message the resumed session receives (default:
@@ -118,9 +118,9 @@ elif [ "$WHEN" = "reset" ]; then
   else
     echo "No local reset time found (no rate snapshot yet)."
     echo "Options:"
-    echo "  claude-auto-resume resume-at auto      # watch and resume when a limit hits"
-    echo "  claude-auto-resume resume-at <time>    # if you know the reset time"
-    echo "  claude-auto-resume setup-statusline    # capture it for next time"
+    echo "  claude-standby resume-at auto      # watch and resume when a limit hits"
+    echo "  claude-standby resume-at <time>    # if you know the reset time"
+    echo "  claude-standby setup-statusline    # capture it for next time"
     exit 0
   fi
 else
@@ -182,7 +182,7 @@ if [ -n "$SESSION_ARG" ]; then
   SESSION_ID="$(resolve_session "$SESSION_ARG")"
   if [ -z "$SESSION_ID" ] && [ "$SESSION_ARG" != "new" ]; then
     echo "No session matches '--session $SESSION_ARG'."
-    echo "List them with: claude-auto-resume sessions"
+    echo "List them with: claude-standby sessions"
     exit 0
   fi
   SESSION_SOURCE="picked"
@@ -258,5 +258,5 @@ if [ -n "$PROMPT_SHOW" ]; then
 fi
 echo "  importance : $(ar_task_get "$WS" importance)"
 echo "  daemon     : $([ -n "${AR_NO_DAEMON:-}" ] && echo 'not spawned (AR_NO_DAEMON)' || echo 'running detached, wakes every 60s')"
-echo "Cancel any time with: claude-auto-resume cancel   Watch: claude-auto-resume status"
+echo "Cancel any time with: claude-standby cancel   Watch: claude-standby status"
 exit 0

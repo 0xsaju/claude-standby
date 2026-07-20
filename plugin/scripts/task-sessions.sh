@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# task-sessions.sh — backend for `claude-auto-resume sessions`
+# task-sessions.sh — backend for `claude-standby sessions`
 #
 # Lists this workspace's Claude Code sessions (HOOK-FINDINGS F2) so the
 # user can pick WHICH conversation the daemon resumes after a limit reset.
 # The index numbers printed here are accepted by:
-#   claude-auto-resume resume-at [when] [tier] --session <n|id|latest|new>
+#   claude-standby resume-at [when] [tier] --session <n|id|latest|new>
 set -u
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck disable=SC1091
@@ -62,5 +62,5 @@ else
   echo "No session pinned yet — scheduling a resume pins the newest one"
   echo "automatically (override with --session)."
 fi
-echo "Pick one:  claude-auto-resume resume-at auto --session <n>"
+echo "Pick one:  claude-standby resume-at auto --session <n>"
 exit 0

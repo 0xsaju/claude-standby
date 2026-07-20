@@ -1,4 +1,4 @@
-# Contributing to claude-auto-resume
+# Contributing to claude-standby
 
 Thanks for considering a contribution. This project values small, honest,
 well-tested changes over big ambitious ones.
@@ -10,7 +10,7 @@ limit-hit message wording, the session-store layout, and the status-line
 rate stream. Real-world confirmation on hardware/accounts we can't test is
 gold — especially the exact `used_percentage` value the status line reports
 when Claude Code actually blocks (our `AR_LIMIT_PCT=100` default is
-unverified). If you hit a real limit, `claude-auto-resume doctor` shows what
+unverified). If you hit a real limit, `claude-standby doctor` shows what
 the tool read; a sanitized paste of that (and the limit message wording) in
 an issue directly improves detection.
 
@@ -36,8 +36,8 @@ call — `claude -p "ok" --model haiku >/dev/null 2>&1; echo $?`.
 ## Development setup
 
 ```sh
-git clone https://github.com/0xsaju/claude-auto-resume
-cd claude-auto-resume
+git clone https://github.com/0xsaju/claude-standby
+cd claude-standby
 bash test/run-tests.sh     # must print "… 0 failed"
 ```
 
@@ -68,7 +68,7 @@ folder in VS Code and press F5 to run it.
 
 ## Reporting bugs
 
-`claude-auto-resume doctor` output plus the relevant `log` lines
+`claude-standby doctor` output plus the relevant `log` lines
 (`~/.claude/auto-resume/logs/plugin.log`) make almost any report
 actionable. State is in `~/.claude/auto-resume/state.json` — sanitize
 before pasting.

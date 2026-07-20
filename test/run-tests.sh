@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# run-tests.sh — shell test suite for claude-auto-resume Phase 0.
+# run-tests.sh — shell test suite for claude-standby Phase 0.
 # Runs the lib.sh state suite against every available JSON engine
 # (jq, python3, text) plus cross-engine interop, timestamp helpers,
 # and fake-claude behavior.
@@ -39,7 +39,7 @@ wait_until() {
 
 # ---------------------------------------------------------- syntax checks --
 
-for f in "$PLUGIN"/scripts/*.sh "$HERE"/fake-claude.sh "$HERE"/run-tests.sh "$HERE"/../bin/claude-auto-resume "$HERE"/../install.sh; do
+for f in "$PLUGIN"/scripts/*.sh "$HERE"/fake-claude.sh "$HERE"/run-tests.sh "$HERE"/../bin/claude-standby "$HERE"/../install.sh; do
   if bash -n "$f" 2>/dev/null; then
     ok "syntax: $(basename "$f")"
   else
@@ -61,8 +61,8 @@ state_suite() {
   local eng="$1"
   local tmp
   tmp="$(mktemp -d "${TMPDIR:-/tmp}/ar-test-XXXXXX")"
-  export CLAUDE_AUTO_RESUME_STATE="$tmp/state.json"
-  export CLAUDE_AUTO_RESUME_LOG_DIR="$tmp/logs"
+  export CLAUDE_STANDBY_STATE="$tmp/state.json"
+  export CLAUDE_STANDBY_LOG_DIR="$tmp/logs"
   export AR_JSON_ENGINE="$eng"
   # shellcheck disable=SC1091
   . "$PLUGIN/scripts/lib.sh"
@@ -72,8 +72,8 @@ state_suite() {
 
   # 1. init
   ar_state_init
-  [ -f "$CLAUDE_AUTO_RESUME_STATE" ] && ok "$eng: init creates state file" || fail "$eng: init creates state file"
-  t_contains "$eng: init writes version 2" '"version": 2' "$(cat "$CLAUDE_AUTO_RESUME_STATE")"
+  [ -f "$CLAUDE_STANDBY_STATE" ] && ok "$eng: init creates state file" || fail "$eng: init creates state file"
+  t_contains "$eng: init writes version 2" '"version": 2' "$(cat "$CLAUDE_STANDBY_STATE")"
 
   # 2. upsert + get round trip (incl. a value with quotes and equals sign)
   local PROMPT='Build the "thing" x=1 and keep going'
@@ -93,7 +93,7 @@ state_suite() {
   # 4. numeric fields stay numbers
   ar_task_set "$WS" resume_count 2
   t_eq "$eng: numeric get" "2" "$(ar_task_get "$WS" resume_count)"
-  t_contains "$eng: numeric stored unquoted" '"resume_count": 2' "$(cat "$CLAUDE_AUTO_RESUME_STATE")"
+  t_contains "$eng: numeric stored unquoted" '"resume_count": 2' "$(cat "$CLAUDE_STANDBY_STATE")"
 
   # 5. journal append accumulates
   ar_journal_append "$WS" "limit-hit" "reset at 20:00"
@@ -125,10 +125,10 @@ state_suite() {
 
   # 9. state file is valid JSON (checked with any real parser available)
   if command -v python3 >/dev/null 2>&1; then
-    if python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$CLAUDE_AUTO_RESUME_STATE" 2>/dev/null; then
+    if python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$CLAUDE_STANDBY_STATE" 2>/dev/null; then
       ok "$eng: state file is valid JSON"
     else
-      fail "$eng: state file is valid JSON" "$(cat "$CLAUDE_AUTO_RESUME_STATE")"
+      fail "$eng: state file is valid JSON" "$(cat "$CLAUDE_STANDBY_STATE")"
     fi
   fi
 
@@ -147,8 +147,8 @@ done
 
 if command -v jq >/dev/null 2>&1; then
   tmp="$(mktemp -d "${TMPDIR:-/tmp}/ar-test-XXXXXX")"
-  export CLAUDE_AUTO_RESUME_STATE="$tmp/state.json"
-  export CLAUDE_AUTO_RESUME_LOG_DIR="$tmp/logs"
+  export CLAUDE_STANDBY_STATE="$tmp/state.json"
+  export CLAUDE_STANDBY_LOG_DIR="$tmp/logs"
   export AR_JSON_ENGINE="jq"
   . "$PLUGIN/scripts/lib.sh"
   WS="/interop/ws"
@@ -166,9 +166,9 @@ if command -v jq >/dev/null 2>&1; then
   export AR_JSON_ENGINE="jq"
   t_contains "interop: jq reads text-appended journal" "interop 2" "$(ar_journal_show "$WS" 10)"
   if command -v python3 >/dev/null 2>&1; then
-    python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$CLAUDE_AUTO_RESUME_STATE" 2>/dev/null \
+    python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$CLAUDE_STANDBY_STATE" 2>/dev/null \
       && ok "interop: mixed-engine file still valid JSON" \
-      || fail "interop: mixed-engine file still valid JSON" "$(cat "$CLAUDE_AUTO_RESUME_STATE")"
+      || fail "interop: mixed-engine file still valid JSON" "$(cat "$CLAUDE_STANDBY_STATE")"
   fi
   rm -rf "$tmp"
 else
@@ -178,8 +178,8 @@ fi
 # ------------------------------------------------------------- timestamps --
 
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/ar-test-XXXXXX")"
-export CLAUDE_AUTO_RESUME_STATE="$tmp/state.json"
-export CLAUDE_AUTO_RESUME_LOG_DIR="$tmp/logs"
+export CLAUDE_STANDBY_STATE="$tmp/state.json"
+export CLAUDE_STANDBY_LOG_DIR="$tmp/logs"
 unset AR_JSON_ENGINE
 . "$PLUGIN/scripts/lib.sh"
 
@@ -244,8 +244,8 @@ rm -rf "$FTMP"
 # -------------------------------------------------- task-resume-at parsing --
 
 PTMP="$(mktemp -d "${TMPDIR:-/tmp}/ar-test-XXXXXX")"
-export CLAUDE_AUTO_RESUME_STATE="$PTMP/state.json"
-export CLAUDE_AUTO_RESUME_LOG_DIR="$PTMP/logs"
+export CLAUDE_STANDBY_STATE="$PTMP/state.json"
+export CLAUDE_STANDBY_LOG_DIR="$PTMP/logs"
 unset AR_JSON_ENGINE
 export AR_NOTIFY_SILENT=1
 
@@ -293,13 +293,13 @@ rm -rf "$PTMP"
 
 DTMP="$(mktemp -d "${TMPDIR:-/tmp}/ar-test-XXXXXX")"
 DTMP="$(cd "$DTMP" && pwd)"   # normalize: workspace keys come from pwd
-export CLAUDE_AUTO_RESUME_STATE="$DTMP/state.json"
+export CLAUDE_STANDBY_STATE="$DTMP/state.json"
 # Pin the rate snapshot to an isolated (absent) path so tests never read a
 # real status-line cache on the dev machine (/tmp/claude_rate_cache_*).
 # Rate-sensor tests point it at a file they control, then reset it here.
-export CLAUDE_AUTO_RESUME_RATE_FILE="$DTMP/rate.json"
-export CLAUDE_AUTO_RESUME_LOG_DIR="$DTMP/logs"
-export CLAUDE_AUTO_RESUME_CLAUDE_BIN="$HERE/fake-claude.sh"
+export CLAUDE_STANDBY_RATE_FILE="$DTMP/rate.json"
+export CLAUDE_STANDBY_LOG_DIR="$DTMP/logs"
+export CLAUDE_STANDBY_CLAUDE_BIN="$HERE/fake-claude.sh"
 export CLAUDE_PROJECTS_DIR="$DTMP/projects"   # hermetic: no real session store
 export FAKE_CLAUDE_TRANSCRIPT_DIR="$DTMP/transcripts"
 export FAKE_CLAUDE_RUN_SECS=0
@@ -515,16 +515,16 @@ t_eq "armed-bound: ARMED_MAX=0 keeps waiting" "waiting" "$(ar_task_get "$WS19" s
 # --- rate-sensor auto path (HOOK-FINDINGS F4) --------------------------------
 # A dedicated rate file so these don't perturb the probe-path tests (which
 # rely on the default rate.json being absent). Unset again at the end.
-export CLAUDE_AUTO_RESUME_RATE_FILE="$DTMP/rate-sensor.json"
+export CLAUDE_STANDBY_RATE_FILE="$DTMP/rate-sensor.json"
 RFUT=$(( $(date +%s) + 3600 ))
 mkrate() { printf '{ "captured_at": %s, "resets_at": %s, "used_percentage": %s }\n' \
-  "$(date +%s)" "$RFUT" "$1" > "$CLAUDE_AUTO_RESUME_RATE_FILE"; }
+  "$(date +%s)" "$RFUT" "$1" > "$CLAUDE_STANDBY_RATE_FILE"; }
 
 # the status-line sensor captures rate_limits into rate.json
 printf '{"rate_limits":{"five_hour":{"used_percentage":33,"resets_at":%s}}}' "$RFUT" |
   bash "$PLUGIN/scripts/statusline.sh"
 t_contains "sensor: captures used_percentage into rate.json" '"used_percentage": 33' \
-  "$(cat "$CLAUDE_AUTO_RESUME_RATE_FILE")"
+  "$(cat "$CLAUDE_STANDBY_RATE_FILE")"
 
 # armed via sensor (low usage): the sensor says "not limited", but we do NOT
 # trust used_percentage (unverified at a real block) — we fall through to a
@@ -568,14 +568,14 @@ t_eq "rate: grace 0 schedules the exact reset" "$(ar_epoch_to_iso "$RFUT")" "$(a
 # known-time resume to the local reset + grace (mode=at), no probe, no
 # used_percentage. Rate says used=50 here on purpose — reset must NOT consult it.
 WSRR="$DTMP/ws-reset-kw"; mkdir -p "$WSRR"
-printf '{ "captured_at": %s, "resets_at": %s, "used_percentage": 50 }\n' "$(date +%s)" "$RFUT" > "$CLAUDE_AUTO_RESUME_RATE_FILE"
+printf '{ "captured_at": %s, "resets_at": %s, "used_percentage": 50 }\n' "$(date +%s)" "$RFUT" > "$CLAUDE_STANDBY_RATE_FILE"
 (cd "$WSRR" && AR_NO_DAEMON=1 AR_RESET_GRACE_SECS=60 bash "$PLUGIN/scripts/task-resume-at.sh" reset critical >/dev/null)
 t_eq "reset: schedules known-time mode (not auto)" "at" "$(ar_task_get "$WSRR" resume_mode)"
 t_eq "reset: resume_at is reset + grace" "$(ar_epoch_to_iso $(( RFUT + 60 )))" "$(ar_task_get "$WSRR" resume_at)"
 t_eq "reset: marks the limit confirmed" "1" "$(ar_task_get "$WSRR" limit_seen)"
 # reset with NO local rate snapshot: refuses and guides, does not schedule
 WSRR2="$DTMP/ws-reset-norate"; mkdir -p "$WSRR2"
-rm -f "$CLAUDE_AUTO_RESUME_RATE_FILE"
+rm -f "$CLAUDE_STANDBY_RATE_FILE"
 ROUT="$(cd "$WSRR2" && AR_NO_DAEMON=1 bash "$PLUGIN/scripts/task-resume-at.sh" reset 2>&1)"
 t_contains "reset: no rate snapshot is guided, not scheduled" "No local reset time" "$ROUT"
 t_eq "reset: nothing scheduled without a reset time" "" "$(ar_task_get "$WSRR2" resume_mode)"
@@ -593,7 +593,7 @@ kill "$DPR" 2>/dev/null; wait "$DPR" 2>/dev/null
 t_eq "rate: resumes when usage falls after a seen limit" "done" "$(ar_task_get "$WSR3" status)"
 
 # absent rate.json -> the probe path still runs (no regression)
-rm -f "$CLAUDE_AUTO_RESUME_RATE_FILE"
+rm -f "$CLAUDE_STANDBY_RATE_FILE"
 WSR4="$DTMP/ws-rate-absent"; mkdir -p "$WSR4"
 printf 'clean' > "$MODEFILE"
 (cd "$WSR4" && AR_NO_DAEMON=1 bash "$PLUGIN/scripts/task-resume-at.sh" auto critical >/dev/null)
@@ -624,7 +624,7 @@ CLAUDE_SETTINGS_FILE="$SLT" bash "$PLUGIN/scripts/setup-statusline.sh" remove >/
 
 # back to the isolated (absent) default for the remaining probe-path tests
 rm -f "$DTMP/rate-sensor.json"
-export CLAUDE_AUTO_RESUME_RATE_FILE="$DTMP/rate.json"
+export CLAUDE_STANDBY_RATE_FILE="$DTMP/rate.json"
 
 # auto mode: gives up when limit never lifts within the window
 WS9="$DTMP/ws-auto-giveup"; mkdir -p "$WS9"
@@ -674,7 +674,7 @@ else
   ok "daemon: pidfiles cleaned up"
 fi
 
-unset CLAUDE_AUTO_RESUME_CLAUDE_BIN FAKE_CLAUDE_TRANSCRIPT_DIR FAKE_CLAUDE_MODE
+unset CLAUDE_STANDBY_CLAUDE_BIN FAKE_CLAUDE_TRANSCRIPT_DIR FAKE_CLAUDE_MODE
 rm -rf "$DTMP"
 
 # ------------------------------------------------------ session selection --
@@ -683,10 +683,10 @@ rm -rf "$DTMP"
 
 SETMP="$(mktemp -d "${TMPDIR:-/tmp}/ar-test-XXXXXX")"
 SETMP="$(cd "$SETMP" && pwd)"
-export CLAUDE_AUTO_RESUME_STATE="$SETMP/state.json"
-export CLAUDE_AUTO_RESUME_LOG_DIR="$SETMP/logs"
+export CLAUDE_STANDBY_STATE="$SETMP/state.json"
+export CLAUDE_STANDBY_LOG_DIR="$SETMP/logs"
 export CLAUDE_PROJECTS_DIR="$SETMP/projects"
-export CLAUDE_AUTO_RESUME_CLAUDE_BIN="$HERE/fake-claude.sh"
+export CLAUDE_STANDBY_CLAUDE_BIN="$HERE/fake-claude.sh"
 export FAKE_CLAUDE_TRANSCRIPT_DIR="$SETMP/transcripts"
 export FAKE_CLAUDE_RUN_SECS=0
 export FAKE_CLAUDE_MODE=clean
@@ -804,19 +804,19 @@ t_contains "workspace flag: bad path refused" "not a directory" \
 t_contains "sessions --workspace" "bbbbbbbb" \
   "$(cd "$SETMP" && bash "$PLUGIN/scripts/task-sessions.sh" --workspace "$SWS")"
 
-unset CLAUDE_AUTO_RESUME_CLAUDE_BIN CLAUDE_PROJECTS_DIR FAKE_CLAUDE_TRANSCRIPT_DIR FAKE_CLAUDE_MODE
+unset CLAUDE_STANDBY_CLAUDE_BIN CLAUDE_PROJECTS_DIR FAKE_CLAUDE_TRANSCRIPT_DIR FAKE_CLAUDE_MODE
 rm -rf "$SETMP"
 
 # -------------------------------------------------------------- cli wrapper --
 
 CTMP="$(mktemp -d "${TMPDIR:-/tmp}/ar-test-XXXXXX")"
 CTMP="$(cd "$CTMP" && pwd)"
-export CLAUDE_AUTO_RESUME_STATE="$CTMP/state.json"
-export CLAUDE_AUTO_RESUME_LOG_DIR="$CTMP/logs"
+export CLAUDE_STANDBY_STATE="$CTMP/state.json"
+export CLAUDE_STANDBY_LOG_DIR="$CTMP/logs"
 export AR_NOTIFY_SILENT=1
 unset AR_JSON_ENGINE
 . "$PLUGIN/scripts/lib.sh"
-CLI="$HERE/../bin/claude-auto-resume"
+CLI="$HERE/../bin/claude-standby"
 CWS="$CTMP/cli-ws"; mkdir -p "$CWS"
 
 t_contains "cli: status with no task" "No tracked task" "$(cd "$CWS" && bash "$CLI" status)"
@@ -841,15 +841,15 @@ esac
 
 # version comes from the VERSION file — read it, don't hardcode it
 MANIFEST_VER="$(head -1 "$HERE/../VERSION" | tr -d '[:space:]')"
-t_contains "cli: version" "claude-auto-resume $MANIFEST_VER" "$(bash "$CLI" version)"
-t_contains "cli: --version flag" "claude-auto-resume $MANIFEST_VER" "$(bash "$CLI" --version)"
-DOUT="$(CLAUDE_AUTO_RESUME_CLAUDE_BIN="$HERE/fake-claude.sh" bash "$CLI" doctor)"
+t_contains "cli: version" "claude-standby $MANIFEST_VER" "$(bash "$CLI" version)"
+t_contains "cli: --version flag" "claude-standby $MANIFEST_VER" "$(bash "$CLI" --version)"
+DOUT="$(CLAUDE_STANDBY_CLAUDE_BIN="$HERE/fake-claude.sh" bash "$CLI" doctor)"
 DRC=$?
 t_eq "cli: doctor exits 0 when healthy" "0" "$DRC"
 t_contains "cli: doctor reports claude" "claude" "$DOUT"
 t_contains "cli: doctor reports json engine" "engine:" "$DOUT"
 t_contains "cli: doctor reports daemons" "daemons" "$DOUT"
-DOUT="$(CLAUDE_AUTO_RESUME_CLAUDE_BIN="/nonexistent-claude" bash "$CLI" doctor)"
+DOUT="$(CLAUDE_STANDBY_CLAUDE_BIN="/nonexistent-claude" bash "$CLI" doctor)"
 DRC=$?
 t_eq "cli: doctor exits 1 when claude missing" "1" "$DRC"
 t_contains "cli: doctor flags missing claude" "MISS" "$DOUT"
@@ -867,11 +867,11 @@ if command -v git >/dev/null 2>&1 && [ -d "$ROOT/.git" ]; then
   git -C "$ROOT" archive --prefix=car/ HEAD | gzip > "$TARBALL"
   OUT="$(CAR_TARBALL_URL="$TARBALL" CAR_INSTALL_DIR="$ITMP/app" CAR_BIN_DIR="$ITMP/bin" bash "$ROOT/install.sh" 2>&1)"
   t_contains "installer: links the CLI" "Linked" "$OUT"
-  [ -x "$ITMP/bin/claude-auto-resume" ] && ok "installer: CLI link executable" || fail "installer: CLI link executable"
+  [ -x "$ITMP/bin/claude-standby" ] && ok "installer: CLI link executable" || fail "installer: CLI link executable"
   [ ! -e "$ITMP/app/.git" ] && ok "installer: install is a plain tree (no .git)" \
     || fail "installer: install is a plain tree (no .git)"
   IWS="$ITMP/ws"; mkdir -p "$IWS"
-  OUT="$(cd "$IWS" && CLAUDE_AUTO_RESUME_STATE="$ITMP/state.json" CLAUDE_AUTO_RESUME_LOG_DIR="$ITMP/logs" "$ITMP/bin/claude-auto-resume" status)"
+  OUT="$(cd "$IWS" && CLAUDE_STANDBY_STATE="$ITMP/state.json" CLAUDE_STANDBY_LOG_DIR="$ITMP/logs" "$ITMP/bin/claude-standby" status)"
   t_contains "installer: installed CLI runs through symlink" "No tracked task" "$OUT"
   OUT="$(CAR_TARBALL_URL="$TARBALL" CAR_INSTALL_DIR="$ITMP/app" CAR_BIN_DIR="$ITMP/bin" bash "$ROOT/install.sh" 2>&1)"
   t_contains "installer: re-run updates in place" "Updating existing install" "$OUT"
@@ -879,14 +879,14 @@ if command -v git >/dev/null 2>&1 && [ -d "$ROOT/.git" ]; then
   printf 'garbage' > "$ITMP/bad.tgz"
   OUT="$(CAR_TARBALL_URL="$ITMP/bad.tgz" CAR_INSTALL_DIR="$ITMP/app" bash "$ROOT/install.sh" --update 2>&1)"; URC=$?
   t_eq "installer: bad download fails the update" "1" "$URC"
-  [ -x "$ITMP/app/bin/claude-auto-resume" ] && ok "installer: bad download leaves install untouched" \
+  [ -x "$ITMP/app/bin/claude-standby" ] && ok "installer: bad download leaves install untouched" \
     || fail "installer: bad download leaves install untouched"
   # the tarball has HEAD; test the working-tree CLI + scripts + installer
   # against the installed layout
-  cp "$ROOT/bin/claude-auto-resume" "$ITMP/app/bin/claude-auto-resume"
+  cp "$ROOT/bin/claude-standby" "$ITMP/app/bin/claude-standby"
   cp "$ROOT"/plugin/scripts/*.sh "$ITMP/app/plugin/scripts/"
   cp "$ROOT/install.sh" "$ITMP/app/install.sh"
-  OUT="$(CAR_TARBALL_URL="$TARBALL" "$ITMP/bin/claude-auto-resume" update 2>&1)"
+  OUT="$(CAR_TARBALL_URL="$TARBALL" "$ITMP/bin/claude-standby" update 2>&1)"
   t_contains "cli: update swaps and reports the version" "Already up to date" "$OUT"
   if printf '%s' "$OUT" | grep -q "Fast-forward\|Unpacking objects"; then
     fail "cli: update shows no raw git output" "$OUT"
@@ -895,20 +895,20 @@ if command -v git >/dev/null 2>&1 && [ -d "$ROOT/.git" ]; then
   fi
   [ ! -e "$ITMP/app/.git" ] && ok "cli: update leaves a plain tree" || fail "cli: update leaves a plain tree"
   # the swap reset the tree to HEAD — put the working-tree files back
-  cp "$ROOT/bin/claude-auto-resume" "$ITMP/app/bin/claude-auto-resume"
+  cp "$ROOT/bin/claude-standby" "$ITMP/app/bin/claude-standby"
   cp "$ROOT"/plugin/scripts/*.sh "$ITMP/app/plugin/scripts/"
   # a git checkout at an unmanaged path is a dev copy: update + uninstall refuse
   git -C "$ITMP/app" init -q 2>/dev/null
   echo junk > "$ITMP/app/JUNK"
-  OUT="$("$ITMP/bin/claude-auto-resume" update 2>&1)"; URC=$?
+  OUT="$("$ITMP/bin/claude-standby" update 2>&1)"; URC=$?
   t_eq "cli: update refuses a dev checkout" "1" "$URC"
   t_contains "cli: update points a dev checkout at git" "development checkout" "$OUT"
-  OUT="$("$ITMP/bin/claude-auto-resume" uninstall --yes 2>&1)"; URC=$?
+  OUT="$("$ITMP/bin/claude-standby" uninstall --yes 2>&1)"; URC=$?
   t_eq "cli: uninstall refuses dirty dev checkout" "1" "$URC"
   t_contains "cli: uninstall names the guard" "development checkout" "$OUT"
   # same dirty tree as the installer-managed dir → proceeds, with a note
   OUT="$(CAR_INSTALL_DIR="$ITMP/app" CLAUDE_PLUGINS_DIR="$ITMP/noplugins" CLAUDE_SETTINGS_FILE="$ITMP/nosettings.json" \
-    "$ITMP/bin/claude-auto-resume" uninstall --yes 2>&1)"
+    "$ITMP/bin/claude-standby" uninstall --yes 2>&1)"
   t_contains "cli: managed uninstall notes local changes" "local changes" "$OUT"
   t_contains "cli: uninstall reports" "Removed" "$OUT"
   # the legacy-plugin hint (D33) only appears for users who still have it
@@ -917,18 +917,18 @@ if command -v git >/dev/null 2>&1 && [ -d "$ROOT/.git" ]; then
   else
     ok "cli: no legacy-plugin hint without the plugin"
   fi
-  [ ! -e "$ITMP/app" ] && [ ! -e "$ITMP/bin/claude-auto-resume" ] && ok "cli: uninstall removes app and link" \
+  [ ! -e "$ITMP/app" ] && [ ! -e "$ITMP/bin/claude-standby" ] && ok "cli: uninstall removes app and link" \
     || fail "cli: uninstall removes app and link" "$(ls "$ITMP" "$ITMP/bin" 2>/dev/null)"
   # reinstall, then the installer's own --uninstall path — with a trace of
   # the old plugin present, the hint appears
   CAR_TARBALL_URL="$TARBALL" CAR_INSTALL_DIR="$ITMP/app" CAR_BIN_DIR="$ITMP/bin" bash "$ROOT/install.sh" >/dev/null 2>&1
   mkdir -p "$ITMP/plugins"
-  printf '{"repositories":{"x":"claude-auto-resume"}}\n' > "$ITMP/plugins/config.json"
+  printf '{"repositories":{"x":"claude-standby"}}\n' > "$ITMP/plugins/config.json"
   OUT="$(CAR_INSTALL_DIR="$ITMP/app" CAR_BIN_DIR="$ITMP/bin" CLAUDE_PLUGINS_DIR="$ITMP/plugins" \
     CLAUDE_SETTINGS_FILE="$ITMP/nosettings.json" bash "$ROOT/install.sh" --uninstall 2>&1)"
   t_contains "installer: uninstall reports" "Removed" "$OUT"
   t_contains "installer: legacy-plugin hint when plugin present" "/plugin uninstall" "$OUT"
-  [ ! -e "$ITMP/app" ] && [ ! -e "$ITMP/bin/claude-auto-resume" ] && ok "installer: uninstall removes app and link" \
+  [ ! -e "$ITMP/app" ] && [ ! -e "$ITMP/bin/claude-standby" ] && ok "installer: uninstall removes app and link" \
     || fail "installer: uninstall removes app and link" "$(ls "$ITMP" "$ITMP/bin" 2>/dev/null)"
   rm -rf "$ITMP"
 else

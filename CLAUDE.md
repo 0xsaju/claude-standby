@@ -1,4 +1,4 @@
-# claude-auto-resume — guardrails
+# claude-standby — guardrails
 
 Tool that lets Claude Code tasks survive rate-limit hits: detect the limit,
 wait until reset, auto-resume the session. Engine = portable scripts
@@ -20,7 +20,7 @@ path was removed 2026-07-19 (D31): detection reads local data, not hooks.
 - **C3 — Engine layout.** The engine is plain scripts under `plugin/scripts/`
   (the `plugin/` name is legacy — there is no Claude Code plugin anymore; the
   plugin manifest + marketplace were removed with the hooks, D33). The CLI
-  (`bin/claude-auto-resume`) is the only interface (D17); version lives in the
+  (`bin/claude-standby`) is the only interface (D17); version lives in the
   top-level `VERSION` file. No slash commands (they cost tokens and can't run
   while limited).
 - **C4 — Sensors never break the host.** The status-line sensor
@@ -47,7 +47,7 @@ path was removed 2026-07-19 (D31): detection reads local data, not hooks.
   ~/.claude/settings.json (opt-in; python3 JSON edit, backup, reversible)
 - `plugin/scripts/task-*.sh` — command backends
   (task-resume-at.sh = scheduling + spawns the daemon, D10)
-- `bin/claude-auto-resume` — the CLI, the only interface (D15/D17)
+- `bin/claude-standby` — the CLI, the only interface (D15/D17)
 - `VERSION` — the tool version (read by the CLI's `version`; bump on release)
 - `install.sh` — curl-pipe-bash installer; links the CLI (no hooks, no plugin)
 - `vscode-extension/` — cockpit MVP: plain JS, reads state.json, writes

@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# install.sh — one-command installer for claude-auto-resume (D16, D36).
+# install.sh — one-command installer for claude-standby (D16, D36).
 #
-#   curl -fsSL https://raw.githubusercontent.com/0xsaju/claude-auto-resume/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/0xsaju/claude-standby/main/install.sh | bash
 #
 # What it does (no root, no sudo):
-#   1. Downloads a fresh copy into ~/.claude-auto-resume (tarball; git is
+#   1. Downloads a fresh copy into ~/.claude-standby (tarball; git is
 #      only a download fallback — the install is a plain tree, never a
 #      git checkout, D36)
-#   2. Symlinks the CLI into ~/.local/bin/claude-auto-resume
+#   2. Symlinks the CLI into ~/.local/bin/claude-standby
 #
 # Updates use the same download-validate-swap path (`--update`, also
-# reached via `claude-auto-resume update`): the new copy is staged and
+# reached via `claude-standby update`): the new copy is staged and
 # sanity-checked before the old one is replaced, so a failed download
 # never leaves a broken install.
 #
@@ -21,11 +21,11 @@
 # local file path), CAR_INSTALL_DIR, CAR_BIN_DIR, CAR_REF
 set -u
 
-REPO_URL="${CAR_REPO_URL:-https://github.com/0xsaju/claude-auto-resume.git}"
-TARBALL_URL="${CAR_TARBALL_URL:-https://github.com/0xsaju/claude-auto-resume/archive/refs/heads/main.tar.gz}"
-INSTALL_DIR="${CAR_INSTALL_DIR:-$HOME/.claude-auto-resume}"
+REPO_URL="${CAR_REPO_URL:-https://github.com/0xsaju/claude-standby.git}"
+TARBALL_URL="${CAR_TARBALL_URL:-https://github.com/0xsaju/claude-standby/archive/refs/heads/main.tar.gz}"
+INSTALL_DIR="${CAR_INSTALL_DIR:-$HOME/.claude-standby}"
 BIN_DIR="${CAR_BIN_DIR:-$HOME/.local/bin}"
-LINK="$BIN_DIR/claude-auto-resume"
+LINK="$BIN_DIR/claude-standby"
 
 say() { printf '%s\n' "$*"; }
 die() { printf 'install: %s\n' "$*" >&2; exit 1; }
@@ -35,9 +35,9 @@ die() { printf 'install: %s\n' "$*" >&2; exit 1; }
 # pre-removal users who still have a trace of it.
 had_legacy_plugin() {
   P="${CLAUDE_PLUGINS_DIR:-$HOME/.claude/plugins}"
-  grep -qs "claude-auto-resume" "$P/config.json" 2>/dev/null && return 0
+  grep -qs "claude-standby" "$P/config.json" 2>/dev/null && return 0
   grep -qs "claude-auto-resume@auto-resume" "${CLAUDE_SETTINGS_FILE:-$HOME/.claude/settings.json}" 2>/dev/null && return 0
-  [ -n "$(find "$P" -maxdepth 3 -name 'claude-auto-resume*' -print 2>/dev/null | head -1)" ]
+  [ -n "$(find "$P" -maxdepth 3 -name 'claude-standby*' -print 2>/dev/null | head -1)" ]
 }
 
 # Extract a fresh copy of the repo into $1 (an empty directory).
@@ -78,13 +78,13 @@ install_tree() {
   STAGE="$(mktemp -d "$INSTALL_DIR.new-XXXXXX")" || die "cannot create a staging directory next to $INSTALL_DIR"
   if ! fetch_tree "$STAGE"; then
     rm -rf "$STAGE"
-    die "download failed — check your network, or grab it from https://github.com/0xsaju/claude-auto-resume"
+    die "download failed — check your network, or grab it from https://github.com/0xsaju/claude-standby"
   fi
   if ! bash -n "$STAGE/plugin/scripts/lib.sh" 2>/dev/null || [ ! -s "$STAGE/VERSION" ]; then
     rm -rf "$STAGE"
     die "downloaded copy failed a sanity check — install left untouched"
   fi
-  chmod +x "$STAGE"/bin/claude-auto-resume "$STAGE"/plugin/scripts/*.sh "$STAGE"/test/*.sh 2>/dev/null || true
+  chmod +x "$STAGE"/bin/claude-standby "$STAGE"/plugin/scripts/*.sh "$STAGE"/test/*.sh 2>/dev/null || true
   rm -rf "$INSTALL_DIR"
   mv "$STAGE" "$INSTALL_DIR"
 }
@@ -110,7 +110,7 @@ if [ "${1:-}" = "--uninstall" ]; then
   exit 0
 fi
 
-# Quiet in-place update — what `claude-auto-resume update` runs. The CLI
+# Quiet in-place update — what `claude-standby update` runs. The CLI
 # link keeps pointing at the same path, so no relink is needed.
 if [ "${1:-}" = "--update" ]; then
   OLD_VER="$(car_installed_version)"
@@ -136,19 +136,19 @@ esac
 if [ -e "$INSTALL_DIR" ]; then
   say "Updating existing install …"
 else
-  say "Downloading claude-auto-resume …"
+  say "Downloading claude-standby …"
 fi
 install_tree
 
 mkdir -p "$BIN_DIR"
-ln -sf "$INSTALL_DIR/bin/claude-auto-resume" "$LINK"
+ln -sf "$INSTALL_DIR/bin/claude-standby" "$LINK"
 VER="$(car_installed_version)"
 
 # "Linked" line kept for scripts/tests that look for it; kept terse.
 say "Linked → $LINK"
 
 say ""
-say "  ✓  claude-auto-resume ${VER:+v$VER} is ready"
+say "  ✓  claude-standby ${VER:+v$VER} is ready"
 say ""
 say "     Survive Claude Code usage limits: it waits for the reset and"
 say "     resumes your exact conversation. Zero tokens — it even runs"
@@ -156,15 +156,15 @@ say "     while you're limited."
 say ""
 say "  When you hit a limit, from your project directory:"
 say ""
-say "     claude-auto-resume resume-at reset    resume at your 5-hour reset"
-say "     claude-auto-resume resume-at auto     or: watch and resume for me"
+say "     claude-standby resume-at reset    resume at your 5-hour reset"
+say "     claude-standby resume-at auto     or: watch and resume for me"
 say ""
 say "  Anytime:  status  ·  doctor  ·  watch  ·  cancel  ·  help"
 say ""
-say "  Optional GUI — search \"Claude Auto-Resume\" in your editor's"
+say "  Optional GUI — search \"Claude Standby\" in your editor's"
 say "  Extensions view (VS Code Marketplace or Open VSX)."
 say ""
-say "  Docs:  https://github.com/0xsaju/claude-auto-resume"
+say "  Docs:  https://github.com/0xsaju/claude-standby"
 
 case ":$PATH:" in
   *":$BIN_DIR:"*) ;;

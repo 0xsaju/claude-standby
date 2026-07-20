@@ -1,18 +1,18 @@
 {
-  "name": "claude-auto-resume-cockpit",
-  "displayName": "Claude Auto-Resume Cockpit",
-  "description": "Cockpit for claude-auto-resume: auto-resume Claude Code tasks after usage-limit hits. Sidebar dashboard, status bar, one-click controls — the terminal tool does all the work.",
+  "name": "claude-standby-cockpit",
+  "displayName": "Claude Standby Cockpit",
+  "description": "Cockpit for claude-standby: auto-resume Claude Code tasks after usage-limit hits. Sidebar dashboard, status bar, one-click controls — the terminal tool does all the work.",
   "version": "0.8.9",
   "publisher": "0xsaju",
   "icon": "icon.png",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/0xsaju/claude-auto-resume"
+    "url": "https://github.com/0xsaju/claude-standby"
   },
-  "homepage": "https://github.com/0xsaju/claude-auto-resume#readme",
+  "homepage": "https://github.com/0xsaju/claude-standby#readme",
   "bugs": {
-    "url": "https://github.com/0xsaju/claude-auto-resume/issues"
+    "url": "https://github.com/0xsaju/claude-standby/issues"
   },
   "engines": {
     "vscode": "^1.85.0"
@@ -38,17 +38,17 @@
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "claudeAutoResume",
-          "title": "Claude Auto-Resume",
+          "id": "claudeStandby",
+          "title": "Claude Standby",
           "icon": "sidebar-icon.svg"
         }
       ]
     },
     "views": {
-      "claudeAutoResume": [
+      "claudeStandby": [
         {
           "type": "webview",
-          "id": "claudeAutoResume.dashboardView",
+          "id": "claudeStandby.dashboardView",
           "name": "Dashboard",
           "icon": "sidebar-icon.svg"
         }
@@ -56,100 +56,100 @@
     },
     "commands": [
       {
-        "command": "claudeAutoResume.openDashboard",
-        "title": "Claude Auto-Resume: Open Dashboard",
+        "command": "claudeStandby.openDashboard",
+        "title": "Claude Standby: Open Dashboard",
         "icon": "$(dashboard)"
       },
       {
-        "command": "claudeAutoResume.menu",
-        "title": "Claude Auto-Resume: Menu"
+        "command": "claudeStandby.menu",
+        "title": "Claude Standby: Menu"
       },
       {
-        "command": "claudeAutoResume.status",
-        "title": "Claude Auto-Resume: Show Status"
+        "command": "claudeStandby.status",
+        "title": "Claude Standby: Show Status"
       },
       {
-        "command": "claudeAutoResume.scheduleResume",
-        "title": "Claude Auto-Resume: Schedule Resume",
+        "command": "claudeStandby.scheduleResume",
+        "title": "Claude Standby: Schedule Resume",
         "icon": "$(calendar)"
       },
       {
-        "command": "claudeAutoResume.cancel",
-        "title": "Claude Auto-Resume: Cancel Task"
+        "command": "claudeStandby.cancel",
+        "title": "Claude Standby: Cancel Task"
       },
       {
-        "command": "claudeAutoResume.refreshView",
-        "title": "Claude Auto-Resume: Refresh",
+        "command": "claudeStandby.refreshView",
+        "title": "Claude Standby: Refresh",
         "icon": "$(refresh)"
       },
       {
-        "command": "claudeAutoResume.openLog",
-        "title": "Claude Auto-Resume: Open Log",
+        "command": "claudeStandby.openLog",
+        "title": "Claude Standby: Open Log",
         "icon": "$(output)"
       },
       {
-        "command": "claudeAutoResume.openConfig",
-        "title": "Claude Auto-Resume: Open Configuration",
+        "command": "claudeStandby.openConfig",
+        "title": "Claude Standby: Open Configuration",
         "icon": "$(gear)"
       },
       {
-        "command": "claudeAutoResume.installCli",
-        "title": "Claude Auto-Resume: Install Terminal Tool"
+        "command": "claudeStandby.installCli",
+        "title": "Claude Standby: Install Terminal Tool"
       }
     ],
     "menus": {
       "view/title": [
         {
-          "command": "claudeAutoResume.openDashboard",
-          "when": "view == claudeAutoResume.dashboardView",
+          "command": "claudeStandby.openDashboard",
+          "when": "view == claudeStandby.dashboardView",
           "group": "navigation@0"
         },
         {
-          "command": "claudeAutoResume.refreshView",
-          "when": "view == claudeAutoResume.dashboardView",
+          "command": "claudeStandby.refreshView",
+          "when": "view == claudeStandby.dashboardView",
           "group": "navigation@1"
         },
         {
-          "command": "claudeAutoResume.openLog",
-          "when": "view == claudeAutoResume.dashboardView",
+          "command": "claudeStandby.openLog",
+          "when": "view == claudeStandby.dashboardView",
           "group": "1_manage@1"
         },
         {
-          "command": "claudeAutoResume.openConfig",
-          "when": "view == claudeAutoResume.dashboardView",
+          "command": "claudeStandby.openConfig",
+          "when": "view == claudeStandby.dashboardView",
           "group": "1_manage@2"
         },
         {
-          "command": "claudeAutoResume.installCli",
-          "when": "view == claudeAutoResume.dashboardView",
+          "command": "claudeStandby.installCli",
+          "when": "view == claudeStandby.dashboardView",
           "group": "1_manage@3"
         }
       ]
     },
     "configuration": {
-      "title": "Claude Auto-Resume",
+      "title": "Claude Standby",
       "properties": {
-        "claudeAutoResume.cliPath": {
+        "claudeStandby.cliPath": {
           "type": "string",
           "default": "",
-          "description": "Path to the claude-auto-resume CLI. Leave empty to auto-detect (PATH, then ~/.local/bin)."
+          "description": "Path to the claude-standby CLI. Leave empty to auto-detect (PATH, then ~/.local/bin)."
         },
-        "claudeAutoResume.author.name": {
+        "claudeStandby.author.name": {
           "type": "string",
           "default": "0xsaju",
           "description": "Name shown in the dashboard's About row."
         },
-        "claudeAutoResume.author.github": {
+        "claudeStandby.author.github": {
           "type": "string",
           "default": "https://github.com/0xsaju",
           "description": "GitHub profile URL for the About row. Leave empty to hide."
         },
-        "claudeAutoResume.author.linkedin": {
+        "claudeStandby.author.linkedin": {
           "type": "string",
           "default": "",
           "description": "LinkedIn URL for the About row. Leave empty to hide."
         },
-        "claudeAutoResume.author.buyMeACoffee": {
+        "claudeStandby.author.buyMeACoffee": {
           "type": "string",
           "default": "",
           "description": "Buy Me a Coffee URL for the About row. Leave empty to hide."

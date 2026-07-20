@@ -15,7 +15,7 @@ them, and prefer running the publish commands yourself (they take a secret).
 ```sh
 cd vscode-extension
 rm -f *.vsix
-npx @vscode/vsce package --no-dependencies -o claude-auto-resume-cockpit-<version>.vsix
+npx @vscode/vsce package --no-dependencies -o claude-standby-cockpit-<version>.vsix
 ```
 
 The `.vsix` is gitignored (build artifact). `.vscodeignore` keeps dev files
@@ -43,7 +43,7 @@ The `.vsix` is gitignored (build artifact). `.vscodeignore` keeps dev files
    ```
 3. Publish the built vsix:
    ```sh
-   npx ovsx publish claude-auto-resume-cockpit-<version>.vsix -p <OVSX_TOKEN>
+   npx ovsx publish claude-standby-cockpit-<version>.vsix -p <OVSX_TOKEN>
    ```
 
 ## Automated publishing (CI)

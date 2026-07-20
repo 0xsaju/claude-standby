@@ -1,6 +1,6 @@
 <div align="center">
 
-# claude-auto-resume
+# claude-standby
 
 **Your Claude Code task hit a usage limit at 2 AM. It finished anyway.**
 
@@ -12,8 +12,8 @@ session with context, and never makes you babysit a terminal again.
 ![Version](https://img.shields.io/badge/version-0.6.0-informational)
 ![Tests](https://img.shields.io/badge/tests-237%20passing-brightgreen)
 ![Status](https://img.shields.io/badge/status-alpha-orange)
-[![VS Marketplace](https://img.shields.io/badge/VS_Marketplace-Install-0066b8?logo=visualstudiocode&logoColor=white)](https://marketplace.visualstudio.com/items?itemName=0xsaju.claude-auto-resume-cockpit)
-[![Open VSX](https://img.shields.io/badge/Open_VSX-Install-a60ee5)](https://open-vsx.org/extension/0xsaju/claude-auto-resume-cockpit)
+[![VS Marketplace](https://img.shields.io/badge/VS_Marketplace-Install-0066b8?logo=visualstudiocode&logoColor=white)](https://marketplace.visualstudio.com/items?itemName=0xsaju.claude-standby-cockpit)
+[![Open VSX](https://img.shields.io/badge/Open_VSX-Install-a60ee5)](https://open-vsx.org/extension/0xsaju/claude-standby-cockpit)
 
 [Install](#installation) · [Quick start](#quick-start) ·
 [Commands](#commands) · [How it works](#how-it-works) ·
@@ -27,7 +27,7 @@ session with context, and never makes you babysit a terminal again.
 $ claude
   … ✗ You've hit your session limit · resets 4:10pm (Asia/Dhaka)
 
-$ claude-auto-resume resume-at
+$ claude-standby resume-at
   Resume scheduled.
     workspace  : ~/projects/my-app
     resume at  : auto-detect (probing every 30 min until the limit lifts)
@@ -54,17 +54,17 @@ Everything in the panel maps 1:1 to a CLI command — the reference is built in:
 Long agentic tasks regularly outlive a usage window. When the limit hits,
 the session dies mid-task — and you check back every twenty minutes so you
 can type "continue" the moment it resets. That's an alarm clock job, not a
-developer job. claude-auto-resume takes the shift for you: one command
+developer job. claude-standby takes the shift for you: one command
 after the limit hits (soon: zero commands), and the task resumes itself
 the moment resuming is possible.
 
-## Not the same as the like-named script
+## A related tool
 
-There's an earlier shell utility with the same name
-([terryso/claude-auto-resume](https://github.com/terryso/claude-auto-resume)).
-It solves the same annoyance and is a good, simpler take: a foreground
-wrapper that runs Claude, `sleep`s until the limit's timestamp, and re-runs.
-This project takes a different shape:
+There's an earlier shell utility for the same annoyance,
+[terryso/claude-auto-resume](https://github.com/terryso/claude-auto-resume)
+(this project started under that name too, before the rename). It's a good,
+simpler take: a foreground wrapper that runs Claude, `sleep`s until the
+limit's timestamp, and re-runs. Claude Standby takes a different shape:
 
 - **Detached daemon, not a foreground wrapper** — schedule it and close the
   terminal; it fires per-workspace and survives laptop suspend.
@@ -82,7 +82,7 @@ the daemon + UI + safety rails.
 
 | | |
 |---|---|
-| **True session resume** | The interrupted **conversation itself** continues (`claude --resume <session-id>`) — not a fresh chat. The newest session is pinned automatically; `claude-auto-resume sessions` lists them, `--session` picks another, and the VS Code cockpit shows them as one-click plates. |
+| **True session resume** | The interrupted **conversation itself** continues (`claude --resume <session-id>`) — not a fresh chat. The newest session is pinned automatically; `claude-standby sessions` lists them, `--session` picks another, and the VS Code cockpit shows them as one-click plates. |
 | **Exact reset detection** | Auto mode reads your live reset time from Claude Code's own usage data and schedules the resume for that **exact** moment — no polling, no quota. Works with zero setup when your status line already caches it (or `setup-statusline` to add a tiny sensor); falls back to a single limit-message probe when no local data exists. |
 | **Works when nothing else does** | The CLI costs zero tokens and needs no model turn — it works *while you're rate-limited*, which is precisely when you need it. |
 | **Importance tiers** | `critical` resumes silently, `normal` gives you a 5-minute window to object, `low` only notifies. |
@@ -97,21 +97,21 @@ One command — no root, no dependencies beyond bash (`jq` recommended,
 `python3` used if present):
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/0xsaju/claude-auto-resume/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/0xsaju/claude-standby/main/install.sh | bash
 ```
 
 This is the **complete** setup: the CLI lands on your PATH
-(`~/.local/bin`) and the engine in `~/.claude-auto-resume`. Nothing else to
+(`~/.local/bin`) and the engine in `~/.claude-standby`. Nothing else to
 configure — exact-reset detection works automatically if your status line
-already caches your usage (otherwise `claude-auto-resume setup-statusline`
+already caches your usage (otherwise `claude-standby setup-statusline`
 adds a tiny sensor, opt-in).
 
 The tool manages itself from then on:
 
 ```sh
-claude-auto-resume update       # get the latest version (download + swap)
-claude-auto-resume doctor       # verify the whole environment
-claude-auto-resume uninstall    # remove cleanly (keeps your task state)
+claude-standby update       # get the latest version (download + swap)
+claude-standby doctor       # verify the whole environment
+claude-standby uninstall    # remove cleanly (keeps your task state)
 ```
 
 > **Windows**: best-effort via WSL/Git Bash for now; native support
@@ -121,10 +121,10 @@ claude-auto-resume uninstall    # remove cleanly (keeps your task state)
 
 A thin VS Code / Cursor panel over the same CLI — status bar, one-click
 scheduling, and a dashboard. Install from your editor's Extensions view
-(search **"Claude Auto-Resume"**), or directly:
+(search **"Claude Standby"**), or directly:
 
-- **VS Code** → **[Marketplace](https://marketplace.visualstudio.com/items?itemName=0xsaju.claude-auto-resume-cockpit)**
-- **Cursor / Windsurf / VSCodium** → **[Open VSX](https://open-vsx.org/extension/0xsaju/claude-auto-resume-cockpit)**
+- **VS Code** → **[Marketplace](https://marketplace.visualstudio.com/items?itemName=0xsaju.claude-standby-cockpit)**
+- **Cursor / Windsurf / VSCodium** → **[Open VSX](https://open-vsx.org/extension/0xsaju/claude-standby-cockpit)**
 
 On first run it offers to install the CLI above for you. The cockpit drives
 the CLI; it never spawns or parses Claude Code itself.
@@ -135,25 +135,25 @@ The day a limit interrupts you:
 
 ```sh
 cd ~/projects/my-app
-claude-auto-resume resume-at          # auto-detect the reset, resume, done
+claude-standby resume-at          # auto-detect the reset, resume, done
 ```
 
 Prefer an exact time, or want to watch?
 
 ```sh
-claude-auto-resume resume-at 20:00    # resume precisely at 20:00
-claude-auto-resume status             # task state, attempts, journal
-claude-auto-resume watch              # follow the daemon log live
-claude-auto-resume cancel             # stop everything, immediately
+claude-standby resume-at 20:00    # resume precisely at 20:00
+claude-standby status             # task state, attempts, journal
+claude-standby watch              # follow the daemon log live
+claude-standby cancel             # stop everything, immediately
 ```
 
 Track a long task up front so it carries an importance tier:
 
 ```sh
-claude-auto-resume start critical "Migrate the billing service to the new API"
+claude-standby start critical "Migrate the billing service to the new API"
 ```
 
-Tip: `alias car='claude-auto-resume'`.
+Tip: `alias cs='claude-standby'`.
 
 ## Commands
 
@@ -182,7 +182,7 @@ the limit to the resumed conversation:
 sequenceDiagram
     actor You
     participant CC as Claude Code
-    participant AR as claude-auto-resume
+    participant AR as claude-standby
     participant D as daemon
     Note over You,CC: your long task is running
     CC-->>You: 5-hour limit hit — task stops
@@ -214,7 +214,7 @@ Everything the daemon knows lives in that one human-readable `state.json` —
 also the contract every UI reads. One engine, many front doors:
 
 ```text
-bin/claude-auto-resume    the CLI — the only interface
+bin/claude-standby    the CLI — the only interface
 plugin/scripts/           the engine: state, daemon, rate sensor, time parsing
 vscode-extension/         status-bar + dashboard cockpit for VS Code
 test/                     fake-claude stub + full test suite
@@ -254,8 +254,8 @@ caps we can't beat, the docs say so plainly.
 ## Development
 
 ```sh
-git clone https://github.com/0xsaju/claude-auto-resume
-cd claude-auto-resume
+git clone https://github.com/0xsaju/claude-standby
+cd claude-standby
 bash test/run-tests.sh        # full suite, no real quota ever spent
 ```
 
@@ -299,4 +299,4 @@ Stated plainly, because a tool that manages your quota shouldn't oversell:
 
 ## License
 
-[MIT](LICENSE) © claude-auto-resume authors
+[MIT](LICENSE) © claude-standby authors

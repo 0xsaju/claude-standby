@@ -1,7 +1,7 @@
-# claude-auto-resume — User Guide
+# claude-standby — User Guide
 
 Everything you need to install, use, configure, and troubleshoot
-claude-auto-resume. For design internals, see
+claude-standby. For design internals, see
 [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Contents
@@ -31,15 +31,15 @@ claude-auto-resume. For design internals, see
 
 ## 2. Installation
 
-**One command** (recommended — installs the tool to `~/.claude-auto-resume`
+**One command** (recommended — installs the tool to `~/.claude-standby`
 and links the CLI into `~/.local/bin`, no root needed):
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/0xsaju/claude-auto-resume/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/0xsaju/claude-standby/main/install.sh | bash
 ```
 
 That single command sets up everything: the CLI on your PATH. After that the
-tool manages itself: `claude-auto-resume update` / `uninstall` / `doctor`.
+tool manages itself: `claude-standby update` / `uninstall` / `doctor`.
 (Re-running the curl command also updates; `... | bash -s -- --uninstall`
 also uninstalls.)
 
@@ -47,25 +47,25 @@ Verify:
 
 ```sh
 cd ~/any/project
-claude-auto-resume status
+claude-standby status
 ```
 
 You should see "No tracked task for this workspace". If the command isn't
 found, `~/.local/bin` isn't on your PATH — the installer printed the line
-to add. Suggested alias for your shell rc: `alias car='claude-auto-resume'`.
+to add. Suggested alias for your shell rc: `alias cs='claude-standby'`.
 
 If you'd rather work from your own clone, skip the installer and link the
 CLI manually:
 
 ```sh
-ln -s /path/to/claude-auto-resume/bin/claude-auto-resume ~/.local/bin/
+ln -s /path/to/claude-standby/bin/claude-standby ~/.local/bin/
 ```
 
 ### 2.1 How detection works (no setup required)
 
 The CLI is the whole control surface — the install is just the CLI on your
 PATH, nothing written to `~/.claude/settings.json`. You arm the tool for a
-task by scheduling a resume (`claude-auto-resume resume-at auto`); from then
+task by scheduling a resume (`claude-standby resume-at auto`); from then
 on a small background daemon watches for the reset and continues your
 conversation.
 
@@ -74,7 +74,7 @@ Claude Code streams your live usage and exact reset (`used_percentage`,
 `resets_at`) to its status line, and many setups already cache it on disk
 (HOOK-FINDINGS F4). When that data is present, auto-detect schedules to the
 exact reset with **zero setup and no quota**. If nothing local carries it,
-run `claude-auto-resume setup-statusline` (opt-in — see §3 and §5) to install
+run `claude-standby setup-statusline` (opt-in — see §3 and §5) to install
 a tiny sensor, or fall back to a single limit-message probe (HOOK-FINDINGS
 F1). The conversation to resume is discovered from the Claude Code session
 store (HOOK-FINDINGS F2) and pinned at schedule time.
@@ -89,7 +89,7 @@ directory Claude Code is running in.
 | Tier | At reset time |
 |---|---|
 | `critical` | Resumes immediately, no confirmation. |
-| `normal` | Sends a notification, waits 5 minutes, then resumes — unless you `claude-auto-resume cancel` inside that window. |
+| `normal` | Sends a notification, waits 5 minutes, then resumes — unless you `claude-standby cancel` inside that window. |
 | `low` | Sends a notification only. You resume manually. |
 
 **The daemon.** Scheduling spawns a small background process that survives
@@ -104,8 +104,8 @@ command. When that data is available locally, auto mode reads it and
 schedules the resume for the **exact** reset moment, with no probe and no
 quota spent. Many setups already cache this (e.g. a status-line script that
 writes `/tmp/claude_rate_cache_$USER.json`), in which case it works with
-**zero setup** — `claude-auto-resume doctor` shows the reset time it found.
-If nothing local has it, run `claude-auto-resume setup-statusline` to
+**zero setup** — `claude-standby doctor` shows the reset time it found.
+If nothing local has it, run `claude-standby setup-statusline` to
 install a tiny sensor, or point the tool at your own cache with
 `AR_CFG_RATE_SOURCE` (see §6). With no rate data at all, auto mode falls
 back to probing (below).
@@ -139,7 +139,7 @@ From the project directory:
 
 ```sh
 cd ~/my/project
-claude-auto-resume resume-at reset
+claude-standby resume-at reset
 ```
 
 `reset` means "I just hit a limit — resume at the reset time my usage data
@@ -165,8 +165,8 @@ chat. By default the workspace's most recent session is pinned. To pick a
 different one:
 
 ```text
-claude-auto-resume sessions          # numbered list, newest first
-claude-auto-resume resume-at auto --session 2
+claude-standby sessions          # numbered list, newest first
+claude-standby resume-at auto --session 2
 ```
 
 `--session` also accepts a session id (or unique prefix), `latest`, or
@@ -177,7 +177,7 @@ You can also choose *what the resumed session is told* and *which project
 this is for* — all in one command:
 
 ```text
-claude-auto-resume resume-at auto --session 2 \
+claude-standby resume-at auto --session 2 \
   --prompt "Continue the migration; skip the seeding step we discussed" \
   --workspace ~/projects/other-app
 ```
@@ -198,7 +198,7 @@ If you'd rather resume at an exact time (slightly cheaper — zero probe
 calls — and precise to the minute), pass it explicitly:
 
 ```text
-claude-auto-resume resume-at 20:00
+claude-standby resume-at 20:00
 ```
 
 | Input | Meaning |
@@ -210,8 +210,8 @@ claude-auto-resume resume-at 20:00
 | `2026-07-18T20:00:00+0600` | Exact ISO-8601 timestamp |
 | `now` | Immediately (useful for "just try again") |
 
-A tier argument works with either form: `claude-auto-resume resume-at normal` (auto
-mode) or `claude-auto-resume resume-at 20:00 normal`. A task scheduled on a previously
+A tier argument works with either form: `claude-standby resume-at normal` (auto
+mode) or `claude-standby resume-at 20:00 normal`. A task scheduled on a previously
 untracked workspace defaults to `critical` — you explicitly asked for a
 resume, so it doesn't ask again.
 
@@ -223,32 +223,32 @@ fix — you get a notification saying exactly that.
 ### 4.2 Track a long task before starting it
 
 ```text
-claude-auto-resume start critical Migrate the billing service to the new API
+claude-standby start critical Migrate the billing service to the new API
 ```
 
 This registers the workspace with a tier and your task description. Today,
-tracking gives you `claude-auto-resume status` bookkeeping and means a later
-`claude-auto-resume resume-at` keeps the tier and prompt you chose. Once automatic
+tracking gives you `claude-standby status` bookkeeping and means a later
+`claude-standby resume-at` keeps the tier and prompt you chose. Once automatic
 detection ships, tracked tasks are the ones that will self-schedule at the
 moment a limit hits, with no manual step.
 
 ### 4.3 Watch, cancel, reschedule
 
 ```text
-claude-auto-resume status      # status, tier, attempts used, resume time, journal
-claude-auto-resume cancel      # daemon stands down within one tick (≤ 60s)
-claude-auto-resume resume-at 22:15   # reschedule — the running daemon picks it up
+claude-standby status      # status, tier, attempts used, resume time, journal
+claude-standby cancel      # daemon stands down within one tick (≤ 60s)
+claude-standby resume-at 22:15   # reschedule — the running daemon picks it up
 ```
 
 ### 4.4 After a failure
 
-If `claude-auto-resume status` shows `failed` (cap exhausted or unparseable state), fix
-the cause, then reschedule with `claude-auto-resume resume-at <when>` — that resets the
+If `claude-standby status` shows `failed` (cap exhausted or unparseable state), fix
+the cause, then reschedule with `claude-standby resume-at <when>` — that resets the
 task to `waiting` and the journal keeps the full history.
 
 ## 5. Command reference
 
-### `claude-auto-resume resume-at [when] [critical|normal|low] [--session …] [--prompt …] [--workspace …]`
+### `claude-standby resume-at [when] [critical|normal|low] [--session …] [--prompt …] [--workspace …]`
 
 Schedules an auto-resume for the current workspace and spawns the daemon.
 `when` = `reset` reads the exact reset time from your local usage data and
@@ -264,7 +264,7 @@ change within one tick.
 Pins which Claude Code conversation the resume continues: by default the
 workspace's newest session (a previously pinned session is kept on
 reschedule). `--session` overrides — an index from
-`claude-auto-resume sessions`, a session id or unique prefix, `latest`, or `new`
+`claude-standby sessions`, a session id or unique prefix, `latest`, or `new`
 for a fresh chat. An unknown value refuses rather than silently starting
 a new conversation.
 
@@ -274,40 +274,40 @@ before, or the default). `--workspace <path>` (or `-w`) schedules for
 another project directory instead of the current one — session pinning
 and `--session` indexes then refer to *that* workspace's sessions.
 
-### `claude-auto-resume sessions [--workspace <path>]`
+### `claude-standby sessions [--workspace <path>]`
 
 Lists a workspace's Claude Code sessions (from `~/.claude/projects/`;
 default: the current directory), newest first: pick index, short id, age,
 size, and the first real prompt as a summary. Marks the session currently
 pinned for resume.
 
-### `claude-auto-resume start <critical|normal|low> <task description>`
+### `claude-standby start <critical|normal|low> <task description>`
 
 Registers the current workspace as a tracked task with status `running`.
 Resets the attempt counter. Does not spawn a daemon (nothing to wait for
 yet).
 
-### `claude-auto-resume status`
+### `claude-standby status`
 
 Shows status, tier, attempts used / cap, resume time (if scheduled), the
 task prompt, and the last journal entries.
 
-### `claude-auto-resume cancel`
+### `claude-standby cancel`
 
 Sets the task to `cancelled`, journals it, and immediately stops the
 workspace's daemon **and any resume already in flight** (the claude
 process it launched). Cancelling during a `normal` tier's 5-minute grace
 window aborts that resume.
 
-### `claude-auto-resume list`
+### `claude-standby list`
 
 All tracked workspaces with their status and tier.
 
-### `claude-auto-resume log [n]` / `claude-auto-resume watch`
+### `claude-standby log [n]` / `claude-standby watch`
 
 Show the last `n` lines (default 40) of the tool's log, or follow it live.
 
-### `claude-auto-resume doctor`
+### `claude-standby doctor`
 
 Environment self-check: install location, claude binary on PATH, JSON
 engine in use, state file health, running/stale daemons, notification
@@ -316,7 +316,7 @@ time it found and which source it read (so you can confirm exact-reset
 detection is working before you rely on it). Exits nonzero if resumes can't
 work (claude missing).
 
-### `claude-auto-resume update`
+### `claude-standby update`
 
 Updates the install in place: downloads a fresh copy, sanity-checks it,
 then swaps it in (no git involved — a failed download never leaves a
@@ -325,18 +325,18 @@ If you're running from your own git clone of the repo, `update` refuses
 and tells you to `git pull` instead — it will never touch a development
 checkout.
 
-### `claude-auto-resume uninstall [--yes]`
+### `claude-standby uninstall [--yes]`
 
 Removes the install directory and the CLI link after confirmation
 (`--yes` skips the prompt). Your task state and logs under
 `~/.claude/auto-resume` are kept; the command prints how to remove them.
 A git checkout with uncommitted changes is refused so it can't eat a
 development copy — except the installer-managed directory
-(`~/.claude-auto-resume`), which is always removable (host filesystems can
+(`~/.claude-standby`), which is always removable (host filesystems can
 dirty an installed clone through no fault of yours; you'll get a note that
 local changes go with it).
 
-### `claude-auto-resume setup-statusline` / `claude-auto-resume remove-statusline`
+### `claude-standby setup-statusline` / `claude-standby remove-statusline`
 
 Install or remove the optional status-line **sensor** that captures the
 exact reset time into `~/.claude/auto-resume/rate.json`, so auto mode can
@@ -350,7 +350,7 @@ refreshes the path. Requires `python3`. You don't need this if a local cache alr
 carries the reset time (`doctor` will tell you) — it's only for setups that
 have none.
 
-### `claude-auto-resume version`
+### `claude-standby version`
 
 Prints the version and git revision.
 
@@ -361,9 +361,9 @@ Optional config file: `~/.claude/auto-resume/config` (plain shell,
 
 | Config variable | Env override | Default | Purpose |
 |---|---|---|---|
-| `AR_CFG_CLAUDE_BIN` | `CLAUDE_AUTO_RESUME_CLAUDE_BIN` | `claude` | Binary the daemon invokes to resume |
-| `AR_CFG_EXTRA_ARGS` | `CLAUDE_AUTO_RESUME_EXTRA_ARGS` | *(empty)* | Extra CLI args appended to the resume command (word-split) |
-| — | `CLAUDE_AUTO_RESUME_STATE` | `~/.claude/auto-resume/state.json` | State file location |
+| `AR_CFG_CLAUDE_BIN` | `CLAUDE_STANDBY_CLAUDE_BIN` | `claude` | Binary the daemon invokes to resume |
+| `AR_CFG_EXTRA_ARGS` | `CLAUDE_STANDBY_EXTRA_ARGS` | *(empty)* | Extra CLI args appended to the resume command (word-split) |
+| — | `CLAUDE_STANDBY_STATE` | `~/.claude/auto-resume/state.json` | State file location |
 | — | `AR_DAEMON_TICK_SECS` | `60` | Daemon wake interval |
 | — | `AR_NORMAL_GRACE_SECS` | `300` | `normal` tier confirmation window (notify → wait → resume, so you can cancel) |
 | `AR_CFG_RESET_GRACE` | `AR_RESET_GRACE_SECS` | `60` | Safety buffer added *after* a detected reset before attempting the resume (avoids bouncing off a still-active limit at the exact reset instant). `0` = attempt on the dot |
@@ -371,7 +371,7 @@ Optional config file: `~/.claude/auto-resume/config` (plain shell,
 | — | `AR_PROBE_INTERVAL_SECS` | `1800` | Auto mode: seconds between limit probes (fallback path only) |
 | `AR_CFG_PROBE_MODEL` | `AR_PROBE_MODEL` | `haiku` | Auto mode: model for the probe call |
 | — | `AR_AUTO_GIVEUP_SECS` | `21600` | Auto mode: give up after this long still limited (6 h ≈ "must be a weekly cap") |
-| `AR_CFG_RATE_SOURCE` | `CLAUDE_AUTO_RESUME_RATE_FILE` | *(auto)* | Path to the rate snapshot with the exact reset time. Resolution order: this env → this config → our sensor's `rate.json` → `/tmp/claude_rate_cache_$USER.json` |
+| `AR_CFG_RATE_SOURCE` | `CLAUDE_STANDBY_RATE_FILE` | *(auto)* | Path to the rate snapshot with the exact reset time. Resolution order: this env → this config → our sensor's `rate.json` → `/tmp/claude_rate_cache_$USER.json` |
 | — | `AR_LIMIT_PCT` | `100` | Auto mode: `used_percentage` at which the sensor treats you as limited (conservative default; unverified against a real limit). Below it, the daemon still probes to be sure — it never trusts the sensor's "not limited" alone |
 | — | `AR_ARMED_MAX_SECS` | `86400` | Auto mode: stand down after this long armed with no limit seen (`0` = never; protects quota) |
 | — | `AR_NOTIFY_SILENT` | *(unset)* | Set to `1` to suppress desktop notifications |
@@ -409,7 +409,7 @@ lines → the daemon never started (see next item). Lines ending in
 **Is the daemon alive?**
 `cat ~/.claude/auto-resume/daemons/*.pid` and `ps -p <pid>`. If the machine
 rebooted while waiting, the daemon died with it — re-arm with
-`claude-auto-resume resume-at <when>`. (Reboot-surviving schedules are on the roadmap.)
+`claude-standby resume-at <when>`. (Reboot-surviving schedules are on the roadmap.)
 
 **Resume ran but the session did nothing useful.**
 Check `last_output_tail` in state.json and your `PROGRESS.md`. Headless
@@ -417,11 +417,11 @@ sessions can't ask for permissions — if the tail shows permission refusals,
 set an allowlist (section 6).
 
 **It keeps retrying and failing.**
-The journal (via `claude-auto-resume status`) shows each attempt's reason. A resume that
+The journal (via `claude-standby status`) shows each attempt's reason. A resume that
 bounces off a still-active limit backs off automatically; hitting the cap
 means the reset time you gave was too optimistic — schedule later.
 
-**`claude-auto-resume status` says no task, but I scheduled one.**
+**`claude-standby status` says no task, but I scheduled one.**
 Commands key by directory. Run them from the same directory you scheduled
 from.
 
@@ -435,8 +435,8 @@ without you having to be present. Weekly caps are unaffected by anything
 this tool does.
 
 **Does scheduling have to happen before the limit hits?** No — that's the
-main flow: run `claude-auto-resume resume-at` *after* the limit, and you don't even need
-to know the reset time. Pre-tracking with `claude-auto-resume start` just adds
+main flow: run `claude-standby resume-at` *after* the limit, and you don't even need
+to know the reset time. Pre-tracking with `claude-standby start` just adds
 bookkeeping.
 
 **What do the auto-mode probes cost?** Failed probes (limit still active)
@@ -463,7 +463,7 @@ the machine is awake past the reset time.
 ## 10. Uninstalling
 
 ```sh
-claude-auto-resume uninstall
+claude-standby uninstall
 ```
 
 This removes the install and the CLI link (and the status-line sensor if you

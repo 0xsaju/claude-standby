@@ -6,7 +6,7 @@
 # Loop: wake every $AR_DAEMON_TICK_SECS (default 60), re-read state, compare
 # wall clock against resume_at — never one long sleep, because laptop
 # suspend breaks it. Stands down the moment status is no longer "waiting"
-# (that is how `claude-auto-resume cancel` stops a pending resume: state
+# (that is how `claude-standby cancel` stops a pending resume: state
 # is the channel).
 #
 # Safety rails (C5): max_resumes enforced; failed resume attempts back off
@@ -15,9 +15,9 @@
 #   normal   -> notify, then auto-proceed after $AR_NORMAL_GRACE_SECS (300)
 #   low      -> notify only, never auto-resume
 #
-# The claude binary is ${CLAUDE_AUTO_RESUME_CLAUDE_BIN:-claude} so tests run
+# The claude binary is ${CLAUDE_STANDBY_CLAUDE_BIN:-claude} so tests run
 # against test/fake-claude.sh (C6). Extra CLI args come from
-# CLAUDE_AUTO_RESUME_EXTRA_ARGS / AR_CFG_EXTRA_ARGS (word-split on purpose);
+# CLAUDE_STANDBY_EXTRA_ARGS / AR_CFG_EXTRA_ARGS (word-split on purpose);
 # no --dangerously-skip-permissions unless the user opts in there.
 set -u
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -51,8 +51,8 @@ ARMED_MAX="${AR_ARMED_MAX_SECS:-86400}"
 # at a real limit — default 100, the conservative choice). Below it, we do NOT
 # trust "not limited": a probe confirms (F4 must not blind F1).
 LIMIT_PCT="${AR_LIMIT_PCT:-100}"
-CLAUDE_BIN="${CLAUDE_AUTO_RESUME_CLAUDE_BIN:-${AR_CFG_CLAUDE_BIN:-claude}}"
-EXTRA_ARGS="${CLAUDE_AUTO_RESUME_EXTRA_ARGS:-${AR_CFG_EXTRA_ARGS:-}}"
+CLAUDE_BIN="${CLAUDE_STANDBY_CLAUDE_BIN:-${AR_CFG_CLAUDE_BIN:-claude}}"
+EXTRA_ARGS="${CLAUDE_STANDBY_EXTRA_ARGS:-${AR_CFG_EXTRA_ARGS:-}}"
 
 # One daemon per workspace: pidfile keyed by a hash of the path (kept
 # outside state.json — the pid is host-local, not contract data; D11).
@@ -312,7 +312,7 @@ while :; do
       stand_down "low importance: notified only"
       ;;
     normal)
-      ar_notify "Claude limit reset" "Auto-resuming task in $WS in ${GRACE}s. Stop it with: claude-auto-resume cancel"
+      ar_notify "Claude limit reset" "Auto-resuming task in $WS in ${GRACE}s. Stop it with: claude-standby cancel"
       sleep "$GRACE"
       STATUS="$(ar_task_get "$WS" status)"
       [ "$STATUS" = "waiting" ] || stand_down "status changed to '$STATUS' during grace window"
@@ -347,7 +347,7 @@ while :; do
   if [ "$ATTEMPT" -ge "$MAX" ]; then
     ar_task_set "$WS" status failed
     ar_journal_append "$WS" "failed" "attempt $ATTEMPT exited nonzero; max_resumes reached"
-    ar_notify "Auto-resume failed" "Task in $WS failed after $ATTEMPT attempts. See: claude-auto-resume status"
+    ar_notify "Auto-resume failed" "Task in $WS failed after $ATTEMPT attempts. See: claude-standby status"
     stand_down "final attempt failed"
   fi
 

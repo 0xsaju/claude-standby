@@ -66,8 +66,8 @@ Inspected `~/.claude/projects/` directly (macOS, Claude Code 2.1.214):
 
 - `<encoded-cwd>` is the workspace's absolute path with every
   non-alphanumeric character replaced by `-`. Measured example:
-  `/Users/sazzad/Documents/claude-auto-resume` →
-  `-Users-sazzad-Documents-claude-auto-resume`. Only `/` and `.`-free
+  `/Users/sazzad/Documents/claude-standby` →
+  `-Users-sazzad-Documents-claude-standby`. Only `/` and `.`-free
   paths were sampled locally; the general `[^A-Za-z0-9] → -` rule matches
   every project dir on this machine.
 - One JSONL file per session; the filename (minus `.jsonl`) IS the session
