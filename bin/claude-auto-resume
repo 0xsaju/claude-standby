@@ -160,26 +160,36 @@ EOF
     exec bash "$SCRIPTS_DIR/setup-statusline.sh" remove ;;
 
   update)
-    if [ -d "$ROOT/.git" ] && command -v git >/dev/null 2>&1; then
-      echo "Updating $ROOT ..."
-      if ! git -C "$ROOT" pull --ff-only; then
-        echo "Update failed. Re-run the installer instead:"
-        echo "  curl -fsSL $INSTALL_URL | bash"
-        exit 1
-      fi
-      REV="$(car_gitrev)"
-      echo "Now at $(car_version)${REV:+ ($REV)}."
-    else
-      echo "This install is not a git clone. Re-run the installer to update:"
-      echo "  curl -fsSL $INSTALL_URL | bash"
-    fi
-    exit 0 ;;
-
-  uninstall)
-    if [ -n "$(git -C "$ROOT" status --porcelain 2>/dev/null)" ]; then
-      echo "Refusing: $ROOT has uncommitted changes — this looks like a development checkout."
+    # Updates are download-validate-swap via the installer (D36) — never
+    # `git pull` into the live tree. A git checkout outside the managed
+    # install dir is a development copy: hands off.
+    MANAGED_DIR="${CAR_INSTALL_DIR:-$HOME/.claude-auto-resume}"
+    if [ "$ROOT" != "$MANAGED_DIR" ] && [ -d "$ROOT/.git" ]; then
+      echo "This is a development checkout — update it with git:"
+      echo "  git -C \"$ROOT\" pull"
       exit 1
     fi
+    if [ ! -f "$ROOT/install.sh" ]; then
+      echo "Installer script missing from this install. Re-run the installer to update:"
+      echo "  curl -fsSL $INSTALL_URL | bash"
+      exit 1
+    fi
+    exec env CAR_INSTALL_DIR="$ROOT" bash "$ROOT/install.sh" --update ;;
+
+  uninstall)
+    # A dirty git tree in an unmanaged location looks like a development
+    # checkout — refuse. The installer-managed dir is always removable
+    # (filemode/CRLF quirks can dirty an installed clone through no fault
+    # of the user's).
+    DIRTY="$(git -C "$ROOT" status --porcelain 2>/dev/null || true)"
+    MANAGED_DIR="${CAR_INSTALL_DIR:-$HOME/.claude-auto-resume}"
+    if [ -n "$DIRTY" ] && [ "$ROOT" != "$MANAGED_DIR" ]; then
+      echo "Refusing: $ROOT has uncommitted changes — this looks like a development checkout."
+      echo "If it really is an installed copy, remove it with:"
+      echo "  curl -fsSL $INSTALL_URL | bash -s -- --uninstall"
+      exit 1
+    fi
+    [ -n "$DIRTY" ] && echo "note: $ROOT has local changes — they will be removed with it."
     if [ "${1:-}" != "--yes" ]; then
       printf 'Remove %s and its CLI link? [y/N] ' "$ROOT"
       if ! read -r ANS </dev/tty 2>/dev/null; then

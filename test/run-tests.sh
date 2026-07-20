@@ -611,6 +611,17 @@ CLAUDE_SETTINGS_FILE="$SLT" bash "$PLUGIN/scripts/setup-statusline.sh" remove >/
 t_contains "setup-statusline: restores the original on remove" "echo ORIG" "$(cat "$SLT")"
 t_contains "setup-statusline: preserves unrelated keys" '"model"' "$(cat "$SLT")"
 
+# a registration pointing at an OLD install path is refreshed, not chained
+printf '{ "statusLine": { "type": "command", "command": "bash \\"/old/gone/plugin/scripts/statusline.sh\\"" } }\n' > "$SLT"
+OUT="$(CLAUDE_SETTINGS_FILE="$SLT" bash "$PLUGIN/scripts/setup-statusline.sh" install)"
+t_contains "setup-statusline: stale path is refreshed" "path refreshed" "$OUT"
+t_contains "setup-statusline: settings point at current install" "$(cd "$PLUGIN" && pwd)/scripts/statusline.sh" "$(cat "$SLT")"
+[ ! -f "$DTMP/statusline-chain" ] && ok "setup-statusline: never chains our own stale sensor" \
+  || fail "setup-statusline: never chains our own stale sensor" "$(cat "$DTMP/statusline-chain")"
+OUT="$(CLAUDE_SETTINGS_FILE="$SLT" bash "$PLUGIN/scripts/setup-statusline.sh" install)"
+t_contains "setup-statusline: idempotent when current" "already registered" "$OUT"
+CLAUDE_SETTINGS_FILE="$SLT" bash "$PLUGIN/scripts/setup-statusline.sh" remove >/dev/null
+
 # back to the isolated (absent) default for the remaining probe-path tests
 rm -f "$DTMP/rate-sensor.json"
 export CLAUDE_AUTO_RESUME_RATE_FILE="$DTMP/rate.json"
@@ -845,33 +856,64 @@ t_contains "cli: doctor flags missing claude" "MISS" "$DOUT"
 rm -rf "$CTMP"
 
 # --------------------------------------------------------------- installer --
-# Offline: installs by cloning the local repo itself.
+# Offline: installs from a tarball of the local repo's HEAD (D36 — the
+# install is a plain tree, never a git checkout).
 
 ROOT="$(cd "$HERE/.." && pwd)"
 if command -v git >/dev/null 2>&1 && [ -d "$ROOT/.git" ]; then
   ITMP="$(mktemp -d "${TMPDIR:-/tmp}/ar-test-XXXXXX")"
   ITMP="$(cd "$ITMP" && pwd)"
-  OUT="$(CAR_REPO_URL="$ROOT" CAR_INSTALL_DIR="$ITMP/app" CAR_BIN_DIR="$ITMP/bin" bash "$ROOT/install.sh" 2>&1)"
+  TARBALL="$ITMP/src.tgz"
+  git -C "$ROOT" archive --prefix=car/ HEAD | gzip > "$TARBALL"
+  OUT="$(CAR_TARBALL_URL="$TARBALL" CAR_INSTALL_DIR="$ITMP/app" CAR_BIN_DIR="$ITMP/bin" bash "$ROOT/install.sh" 2>&1)"
   t_contains "installer: links the CLI" "Linked" "$OUT"
   [ -x "$ITMP/bin/claude-auto-resume" ] && ok "installer: CLI link executable" || fail "installer: CLI link executable"
+  [ ! -e "$ITMP/app/.git" ] && ok "installer: install is a plain tree (no .git)" \
+    || fail "installer: install is a plain tree (no .git)"
   IWS="$ITMP/ws"; mkdir -p "$IWS"
   OUT="$(cd "$IWS" && CLAUDE_AUTO_RESUME_STATE="$ITMP/state.json" CLAUDE_AUTO_RESUME_LOG_DIR="$ITMP/logs" "$ITMP/bin/claude-auto-resume" status)"
   t_contains "installer: installed CLI runs through symlink" "No tracked task" "$OUT"
-  OUT="$(CAR_REPO_URL="$ROOT" CAR_INSTALL_DIR="$ITMP/app" CAR_BIN_DIR="$ITMP/bin" bash "$ROOT/install.sh" 2>&1)"
+  OUT="$(CAR_TARBALL_URL="$TARBALL" CAR_INSTALL_DIR="$ITMP/app" CAR_BIN_DIR="$ITMP/bin" bash "$ROOT/install.sh" 2>&1)"
   t_contains "installer: re-run updates in place" "Updating existing install" "$OUT"
-  # the clone has the last committed CLI; test the working-tree CLI +
-  # scripts against the installed layout (committed in the clone so
-  # uninstall's dirty-checkout guard doesn't trip)
+  # a corrupt download must never replace a working install
+  printf 'garbage' > "$ITMP/bad.tgz"
+  OUT="$(CAR_TARBALL_URL="$ITMP/bad.tgz" CAR_INSTALL_DIR="$ITMP/app" bash "$ROOT/install.sh" --update 2>&1)"; URC=$?
+  t_eq "installer: bad download fails the update" "1" "$URC"
+  [ -x "$ITMP/app/bin/claude-auto-resume" ] && ok "installer: bad download leaves install untouched" \
+    || fail "installer: bad download leaves install untouched"
+  # the tarball has HEAD; test the working-tree CLI + scripts + installer
+  # against the installed layout
   cp "$ROOT/bin/claude-auto-resume" "$ITMP/app/bin/claude-auto-resume"
   cp "$ROOT"/plugin/scripts/*.sh "$ITMP/app/plugin/scripts/"
-  git -C "$ITMP/app" add -A 2>/dev/null
-  git -C "$ITMP/app" -c user.email=test@test -c user.name=test commit -qam "test cli" 2>/dev/null
-  OUT="$("$ITMP/bin/claude-auto-resume" uninstall --yes 2>&1)"
+  cp "$ROOT/install.sh" "$ITMP/app/install.sh"
+  OUT="$(CAR_TARBALL_URL="$TARBALL" "$ITMP/bin/claude-auto-resume" update 2>&1)"
+  t_contains "cli: update swaps and reports the version" "Already up to date" "$OUT"
+  if printf '%s' "$OUT" | grep -q "Fast-forward\|Unpacking objects"; then
+    fail "cli: update shows no raw git output" "$OUT"
+  else
+    ok "cli: update shows no raw git output"
+  fi
+  [ ! -e "$ITMP/app/.git" ] && ok "cli: update leaves a plain tree" || fail "cli: update leaves a plain tree"
+  # the swap reset the tree to HEAD — put the working-tree files back
+  cp "$ROOT/bin/claude-auto-resume" "$ITMP/app/bin/claude-auto-resume"
+  cp "$ROOT"/plugin/scripts/*.sh "$ITMP/app/plugin/scripts/"
+  # a git checkout at an unmanaged path is a dev copy: update + uninstall refuse
+  git -C "$ITMP/app" init -q 2>/dev/null
+  echo junk > "$ITMP/app/JUNK"
+  OUT="$("$ITMP/bin/claude-auto-resume" update 2>&1)"; URC=$?
+  t_eq "cli: update refuses a dev checkout" "1" "$URC"
+  t_contains "cli: update points a dev checkout at git" "development checkout" "$OUT"
+  OUT="$("$ITMP/bin/claude-auto-resume" uninstall --yes 2>&1)"; URC=$?
+  t_eq "cli: uninstall refuses dirty dev checkout" "1" "$URC"
+  t_contains "cli: uninstall names the guard" "development checkout" "$OUT"
+  # same dirty tree as the installer-managed dir → proceeds, with a note
+  OUT="$(CAR_INSTALL_DIR="$ITMP/app" "$ITMP/bin/claude-auto-resume" uninstall --yes 2>&1)"
+  t_contains "cli: managed uninstall notes local changes" "local changes" "$OUT"
   t_contains "cli: uninstall reports" "Removed" "$OUT"
   [ ! -e "$ITMP/app" ] && [ ! -e "$ITMP/bin/claude-auto-resume" ] && ok "cli: uninstall removes app and link" \
     || fail "cli: uninstall removes app and link" "$(ls "$ITMP" "$ITMP/bin" 2>/dev/null)"
   # reinstall, then the installer's own --uninstall path
-  CAR_REPO_URL="$ROOT" CAR_INSTALL_DIR="$ITMP/app" CAR_BIN_DIR="$ITMP/bin" bash "$ROOT/install.sh" >/dev/null 2>&1
+  CAR_TARBALL_URL="$TARBALL" CAR_INSTALL_DIR="$ITMP/app" CAR_BIN_DIR="$ITMP/bin" bash "$ROOT/install.sh" >/dev/null 2>&1
   OUT="$(CAR_INSTALL_DIR="$ITMP/app" CAR_BIN_DIR="$ITMP/bin" bash "$ROOT/install.sh" --uninstall 2>&1)"
   t_contains "installer: uninstall reports" "Removed" "$OUT"
   [ ! -e "$ITMP/app" ] && [ ! -e "$ITMP/bin/claude-auto-resume" ] && ok "installer: uninstall removes app and link" \

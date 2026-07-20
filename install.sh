@@ -1,17 +1,24 @@
 #!/usr/bin/env bash
-# install.sh — one-command installer for claude-auto-resume (D16).
+# install.sh — one-command installer for claude-auto-resume (D16, D36).
 #
 #   curl -fsSL https://raw.githubusercontent.com/0xsaju/claude-auto-resume/main/install.sh | bash
 #
 # What it does (no root, no sudo):
-#   1. Clones (or updates) the repo into ~/.claude-auto-resume
+#   1. Downloads a fresh copy into ~/.claude-auto-resume (tarball; git is
+#      only a download fallback — the install is a plain tree, never a
+#      git checkout, D36)
 #   2. Symlinks the CLI into ~/.local/bin/claude-auto-resume
+#
+# Updates use the same download-validate-swap path (`--update`, also
+# reached via `claude-auto-resume update`): the new copy is staged and
+# sanity-checked before the old one is replaced, so a failed download
+# never leaves a broken install.
 #
 # Uninstall:
 #   curl -fsSL .../install.sh | bash -s -- --uninstall
 #
-# Env overrides (mainly for tests): CAR_REPO_URL, CAR_TARBALL_URL,
-# CAR_INSTALL_DIR, CAR_BIN_DIR, CAR_REF
+# Env overrides (mainly for tests): CAR_REPO_URL, CAR_TARBALL_URL (URL or
+# local file path), CAR_INSTALL_DIR, CAR_BIN_DIR, CAR_REF
 set -u
 
 REPO_URL="${CAR_REPO_URL:-https://github.com/0xsaju/claude-auto-resume.git}"
@@ -22,6 +29,59 @@ LINK="$BIN_DIR/claude-auto-resume"
 
 say() { printf '%s\n' "$*"; }
 die() { printf 'install: %s\n' "$*" >&2; exit 1; }
+
+# Extract a fresh copy of the repo into $1 (an empty directory).
+# Prefers the tarball; an explicit CAR_REPO_URL (tests, forks) or a
+# machine without curl+tar uses git — as a downloader only, the .git
+# directory is stripped so the install is always a plain tree.
+fetch_tree() {
+  DEST="$1"
+  SRC="$TARBALL_URL"
+  case "$SRC" in file://*) SRC="${SRC#file://}" ;; esac
+  if [ -f "$SRC" ]; then
+    tar -xzf "$SRC" -C "$DEST" --strip-components 1
+    return $?
+  fi
+  if [ -n "${CAR_REPO_URL:-}" ] && [ -z "${CAR_TARBALL_URL:-}" ] \
+     && command -v git >/dev/null 2>&1; then
+    # shellcheck disable=SC2086
+    git clone --quiet --depth 1 ${CAR_REF:+--branch "$CAR_REF"} "$REPO_URL" "$DEST" 2>/dev/null || return 1
+    rm -rf "$DEST/.git"
+    return 0
+  fi
+  if command -v curl >/dev/null 2>&1 && command -v tar >/dev/null 2>&1; then
+    curl -fsSL "$TARBALL_URL" | tar -xz -C "$DEST" --strip-components 1
+    return $?
+  fi
+  if command -v git >/dev/null 2>&1; then
+    # shellcheck disable=SC2086
+    git clone --quiet --depth 1 ${CAR_REF:+--branch "$CAR_REF"} "$REPO_URL" "$DEST" 2>/dev/null || return 1
+    rm -rf "$DEST/.git"
+    return 0
+  fi
+  die "need either curl + tar, or git"
+}
+
+# Download → validate → swap. Never leaves a half-updated install: the new
+# copy must pass a sanity check in staging before the old one is removed.
+install_tree() {
+  STAGE="$(mktemp -d "$INSTALL_DIR.new-XXXXXX")" || die "cannot create a staging directory next to $INSTALL_DIR"
+  if ! fetch_tree "$STAGE"; then
+    rm -rf "$STAGE"
+    die "download failed — check your network, or grab it from https://github.com/0xsaju/claude-auto-resume"
+  fi
+  if ! bash -n "$STAGE/plugin/scripts/lib.sh" 2>/dev/null || [ ! -s "$STAGE/VERSION" ]; then
+    rm -rf "$STAGE"
+    die "downloaded copy failed a sanity check — install left untouched"
+  fi
+  chmod +x "$STAGE"/bin/claude-auto-resume "$STAGE"/plugin/scripts/*.sh "$STAGE"/test/*.sh 2>/dev/null || true
+  rm -rf "$INSTALL_DIR"
+  mv "$STAGE" "$INSTALL_DIR"
+}
+
+car_installed_version() {
+  head -1 "$INSTALL_DIR/VERSION" 2>/dev/null | tr -d '[:space:]'
+}
 
 if [ "${1:-}" = "--uninstall" ]; then
   if [ -f "$INSTALL_DIR/plugin/scripts/setup-statusline.sh" ]; then
@@ -38,6 +98,21 @@ if [ "${1:-}" = "--uninstall" ]; then
   exit 0
 fi
 
+# Quiet in-place update — what `claude-auto-resume update` runs. The CLI
+# link keeps pointing at the same path, so no relink is needed.
+if [ "${1:-}" = "--update" ]; then
+  OLD_VER="$(car_installed_version)"
+  say "Updating $INSTALL_DIR ..."
+  install_tree
+  NEW_VER="$(car_installed_version)"
+  if [ "$NEW_VER" = "$OLD_VER" ]; then
+    say "Already up to date — ${NEW_VER:-?}."
+  else
+    say "Updated ${OLD_VER:-?} → ${NEW_VER:-?}."
+  fi
+  exit 0
+fi
+
 case "$(uname -s)" in
   Darwin|Linux) ;;
   MINGW*|MSYS*|CYGWIN*)
@@ -46,32 +121,16 @@ case "$(uname -s)" in
     say "note: untested platform '$(uname -s)' — continuing anyway." ;;
 esac
 
-if command -v git >/dev/null 2>&1; then
-  if [ -d "$INSTALL_DIR/.git" ]; then
-    say "Updating existing install …"
-    git -C "$INSTALL_DIR" pull --ff-only >/dev/null 2>&1 || die "git pull failed in $INSTALL_DIR"
-  else
-    [ -e "$INSTALL_DIR" ] && die "$INSTALL_DIR exists but is not a git clone — move it aside first"
-    say "Downloading claude-auto-resume …"
-    # shellcheck disable=SC2086
-    git clone --quiet --depth 1 ${CAR_REF:+--branch "$CAR_REF"} "$REPO_URL" "$INSTALL_DIR" 2>/dev/null \
-      || die "download failed — check your network, or grab it from https://github.com/0xsaju/claude-auto-resume"
-  fi
-elif command -v curl >/dev/null 2>&1 && command -v tar >/dev/null 2>&1; then
-  say "git not found — downloading tarball ..."
-  rm -rf "$INSTALL_DIR"
-  mkdir -p "$INSTALL_DIR"
-  curl -fsSL "$TARBALL_URL" | tar -xz -C "$INSTALL_DIR" --strip-components 1 || die "tarball download failed"
+if [ -e "$INSTALL_DIR" ]; then
+  say "Updating existing install …"
 else
-  die "need either git, or curl + tar"
+  say "Downloading claude-auto-resume …"
 fi
-
-chmod +x "$INSTALL_DIR"/bin/claude-auto-resume "$INSTALL_DIR"/plugin/scripts/*.sh "$INSTALL_DIR"/test/*.sh 2>/dev/null || true
-bash -n "$INSTALL_DIR/plugin/scripts/lib.sh" || die "installed scripts failed a syntax check — bad download?"
+install_tree
 
 mkdir -p "$BIN_DIR"
 ln -sf "$INSTALL_DIR/bin/claude-auto-resume" "$LINK"
-VER="$(head -1 "$INSTALL_DIR/VERSION" 2>/dev/null | tr -d '[:space:]')"
+VER="$(car_installed_version)"
 
 # "Linked" line kept for scripts/tests that look for it; kept terse.
 say "Linked → $LINK"

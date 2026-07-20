@@ -318,16 +318,23 @@ work (claude missing).
 
 ### `claude-auto-resume update`
 
-Updates the install in place (`git pull` under the hood; falls back to
-pointing you at the installer).
+Updates the install in place: downloads a fresh copy, sanity-checks it,
+then swaps it in (no git involved — a failed download never leaves a
+broken install). Prints a one-line summary (`Updated 0.6.0 → 0.7.0.`).
+If you're running from your own git clone of the repo, `update` refuses
+and tells you to `git pull` instead — it will never touch a development
+checkout.
 
 ### `claude-auto-resume uninstall [--yes]`
 
 Removes the install directory and the CLI link after confirmation
 (`--yes` skips the prompt). Your task state and logs under
 `~/.claude/auto-resume` are kept; the command prints how to remove them.
-Refuses to run on a checkout with uncommitted changes so it can't eat a
-development copy.
+A git checkout with uncommitted changes is refused so it can't eat a
+development copy — except the installer-managed directory
+(`~/.claude-auto-resume`), which is always removable (host filesystems can
+dirty an installed clone through no fault of yours; you'll get a note that
+local changes go with it).
 
 ### `claude-auto-resume setup-statusline` / `claude-auto-resume remove-statusline`
 
@@ -338,7 +345,8 @@ in §3). Opt-in because it touches your status line — if you already have
 one, its command is **chained** (run with the same input, output passed
 through) so your display is unchanged, and `remove-statusline` restores it.
 A timestamped backup is written before any change and re-running does
-nothing. Requires `python3`. You don't need this if a local cache already
+nothing; if a registration points at an old install location, re-running
+refreshes the path. Requires `python3`. You don't need this if a local cache already
 carries the reset time (`doctor` will tell you) — it's only for setups that
 have none.
 

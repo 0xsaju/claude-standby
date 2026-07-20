@@ -23,8 +23,15 @@ SENSOR="$SCRIPT_DIR/statusline.sh"
 CHAIN_FILE="$AR_HOME/statusline-chain"
 MODE="${1:-status}"
 
+# Ours = the sensor at its engine path; a bare "statusline.sh" could be
+# someone else's script.
 sensor_registered() {
-  [ -f "$SETTINGS" ] && grep -q "statusline.sh" "$SETTINGS" 2>/dev/null
+  [ -f "$SETTINGS" ] && grep -q "plugin/scripts/statusline.sh" "$SETTINGS" 2>/dev/null
+}
+
+# Registered AND pointing at this install (not a stale path from an old one).
+sensor_current() {
+  [ -f "$SETTINGS" ] && grep -qF "$SENSOR" "$SETTINGS" 2>/dev/null
 }
 
 backup_settings() {
@@ -54,7 +61,7 @@ elif isinstance(sl, str):
     cur_cmd = sl
 else:
     cur_cmd = ""
-is_ours = "statusline.sh" in str(cur_cmd)
+is_ours = "plugin/scripts/statusline.sh" in str(cur_cmd)
 
 def write_chain(value):
     os.makedirs(os.path.dirname(chain_file) or ".", exist_ok=True)
@@ -65,9 +72,12 @@ def write_chain(value):
         os.remove(chain_file)
 
 if op == "install":
-    if not is_ours:
-        # Preserve any existing status line by chaining it.
-        write_chain(cur_cmd if cur_cmd else "")
+    if cur_cmd != our_cmd:
+        if not is_ours:
+            # Preserve any existing status line by chaining it. If the
+            # current command is ours but at a stale install path, just
+            # refresh it — never chain our own sensor.
+            write_chain(cur_cmd if cur_cmd else "")
         base = dict(sl) if isinstance(sl, dict) else {}
         base["type"] = "command"
         base["command"] = our_cmd
@@ -100,6 +110,7 @@ case "$MODE" in
   status)
     if sensor_registered; then
       echo "statusline sensor: registered in $SETTINGS"
+      sensor_current || echo "  WARNING: points at an old install path — run setup-statusline to refresh"
       [ -f "$CHAIN_FILE" ] && echo "  chaining your previous status line"
     else
       echo "statusline sensor: not registered"
@@ -108,10 +119,12 @@ case "$MODE" in
     ;;
 
   install)
-    if sensor_registered; then
+    if sensor_current; then
       echo "Status-line sensor already registered in $SETTINGS."
       exit 0
     fi
+    STALE=0
+    if sensor_registered; then STALE=1; fi
     if ! command -v python3 >/dev/null 2>&1; then
       echo "python3 is required to edit $SETTINGS safely — not found."
       echo "Set statusLine.command to: bash \"$SENSOR\" (save your old command first)."
@@ -122,9 +135,14 @@ case "$MODE" in
       echo "Could not edit $SETTINGS (invalid JSON?). Fix it and retry."
       exit 1
     fi
-    ar_log "setup-statusline: registered in $SETTINGS"
-    echo "Status-line sensor registered — auto-detect can now use the exact"
-    echo "reset time (no polling). Takes effect for new Claude Code sessions."
+    if [ "$STALE" -eq 1 ]; then
+      ar_log "setup-statusline: refreshed stale sensor path in $SETTINGS"
+      echo "Status-line sensor was pointing at an old install — path refreshed."
+    else
+      ar_log "setup-statusline: registered in $SETTINGS"
+      echo "Status-line sensor registered — auto-detect can now use the exact"
+      echo "reset time (no polling). Takes effect for new Claude Code sessions."
+    fi
     [ -f "$CHAIN_FILE" ] && echo "Your existing status line is preserved (chained)."
     exit 0
     ;;

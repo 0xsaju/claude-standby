@@ -62,6 +62,8 @@ path was removed 2026-07-19 (D31): detection reads local data, not hooks.
 
 ## Working conventions
 
+- **Commits carry no AI attribution.** No `Co-Authored-By: Claude …` or
+  any generated-with trailer/byline — ever.
 - Run `bash test/run-tests.sh` before ending a session; keep it green.
 - **Update `PROGRESS.md` before ending any session** (we dogfood our own
   convention) and leave a one-paragraph handoff note.

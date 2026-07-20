@@ -591,3 +591,63 @@ Docs/badges reconciled (README version 0.6.0 / tests 236; removed a stale
 "refresh the plugin" line; ARCHITECTURE schema + auto-detect wording). +1 test
 proving the under-report backstop; the audit's clean items (dead-ref sweep,
 CLI/install integrity) had no findings.
+
+## D35 — 2026-07-20 — Field-report fixes: uninstall guard, quiet update, statusline path refresh
+
+First user field reports (Linux, installed copy at `~/.claude-auto-resume`)
+hit three rough edges in the maintenance commands:
+
+**Uninstall guard exempts the managed dir.** `uninstall` refused any git tree
+with uncommitted changes — but an *installed* clone can go dirty through no
+fault of the user (filemode/CRLF quirks, WSL/odd filesystems, stray files),
+which made the installed copy un-uninstallable. The dirty-tree refusal now
+only applies outside the installer-managed dir (`CAR_INSTALL_DIR`, default
+`~/.claude-auto-resume`); inside it, uninstall proceeds with a note that
+local changes are removed too. The dev-checkout protection is unchanged for
+every other path, and the refusal message now points at the installer's
+`--uninstall` as the escape hatch.
+
+**`update` is quiet.** `git pull` output (remote counting, diffstat, binary
+file noise) was shown raw. The pull is now captured and shown only on
+failure; success prints `Already up to date — X (rev).` or
+`Updated OLD → NEW (rev).`
+
+**`setup-statusline` detects and refreshes stale registrations.** "Already
+registered" was a loose grep for `statusline.sh`, so a registration pointing
+at an old install location (or even an unrelated script of the same name)
+passed as ours and was never fixed. "Ours" now means the
+`plugin/scripts/statusline.sh` engine path; "current" additionally means it
+points at *this* install. Install refreshes a stale ours-path in place
+(never chaining our own sensor as the "previous" status line); `status`
+warns when the registered path is stale.
+
+## D36 — 2026-07-20 — Updates are download-validate-swap; installs are plain trees, not git checkouts
+
+Follow-through on D35: every field bug in the maintenance commands came from
+treating the installed copy as a live git checkout — the dirty-tree uninstall
+refusal, raw `git pull` noise, and `pull --ff-only` breaking outright if the
+managed clone ever diverges. For an installed artifact, "download the new
+version and swap it in" is strictly more robust than "merge the new version
+into whatever state the directory is in."
+
+**Mechanism.** `install.sh` owns one shared path (`install_tree`): fetch a
+fresh tree into a staging dir next to `$INSTALL_DIR` (tarball preferred; git
+clone only as a *download fallback* when curl/tar is missing — and the `.git`
+dir is stripped, so installs are always plain trees), sanity-check it in
+staging (`bash -n lib.sh`, non-empty `VERSION`), then `rm -rf` the old dir
+and `mv` the staged one in. A failed or corrupt download never touches the
+existing install. Fresh installs, installer re-runs, and `install.sh
+--update` (a quiet mode that prints only `Updated OLD → NEW.` / `Already up
+to date — X.`) all go through it.
+
+**CLI.** `claude-auto-resume update` just execs its own install's
+`install.sh --update` (deleting the running scripts mid-swap is safe — bash
+holds open fds). Guard: a git checkout outside the managed dir is a
+development copy; `update` refuses and points at `git pull`. Legacy
+git-based installs at `~/.claude-auto-resume` are migrated automatically —
+the first `update` swaps them to a plain tree, dirty or not.
+
+**Deliberately deferred:** pinning updates to release tags instead of the
+`main` tarball — the repo has no tags yet; adopt when releases are cut.
+`CAR_TARBALL_URL` accepts a local file path (offline tests use a
+`git archive` of HEAD).

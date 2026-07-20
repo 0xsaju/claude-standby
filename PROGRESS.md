@@ -212,3 +212,26 @@ manipulation goes through lib.sh's public API; detection code may only
 match formats measured in docs/HOOK-FINDINGS.md (C1). Keep
 docs/USER-GUIDE.md in sync with any behavior change, and keep the VS Code
 extension a thin shell.
+
+**2026-07-20 — field-report fixes (D35).** Three user-reported issues in the
+maintenance commands, all fixed with regression tests (246 green): uninstall
+no longer refuses the installer-managed dir when its clone is dirty (that
+guard is for dev checkouts only now); `update` prints a one-line version
+summary instead of raw `git pull` output; `setup-statusline` recognizes a
+registration pointing at an old install path and refreshes it instead of
+claiming "already registered" (and `status` warns about stale paths).
+USER-GUIDE updated to match. Handoff: nothing in flight; next session can
+pick up any new field reports or the still-unverified C6 real-limit proof.
+
+**2026-07-20 (later) — git-free updates (D36).** `update` no longer runs
+`git pull`: `install.sh` gained a shared download→validate→swap path
+(staged next to the install, sanity-checked before the old tree is
+replaced), the CLI's `update` delegates to it via `install.sh --update`,
+and installs are now plain trees — git is only a download fallback and its
+`.git` dir is stripped. Legacy clone-based installs migrate on their first
+update; a dev checkout (git dir outside `~/.claude-auto-resume`) is refused
+by both `update` and `uninstall`. README/USER-GUIDE synced; 252 tests green
+(new coverage: plain-tree invariant, corrupt-download rollback, dev-checkout
+refusals, version-transition message). Handoff: consider cutting a release
+tag and pointing the tarball at tags once a release flow exists (deferred
+in D36).

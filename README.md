@@ -89,7 +89,7 @@ adds a tiny sensor, opt-in).
 The tool manages itself from then on:
 
 ```sh
-claude-auto-resume update       # pull the latest version
+claude-auto-resume update       # get the latest version (download + swap)
 claude-auto-resume doctor       # verify the whole environment
 claude-auto-resume uninstall    # remove cleanly (keeps your task state)
 ```
