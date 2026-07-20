@@ -651,3 +651,37 @@ the first `update` swaps them to a plain tree, dirty or not.
 `main` tarball — the repo has no tags yet; adopt when releases are cut.
 `CAR_TARBALL_URL` accepts a local file path (offline tests use a
 `git archive` of HEAD).
+
+## D37 — 2026-07-20 — Rename the project to "Claude Standby"
+
+The tool shipped as `claude-auto-resume`, which collided head-on with an
+existing shell utility of the exact same name
+([terryso/claude-auto-resume](https://github.com/terryso/claude-auto-resume)) —
+same name, same pitch, so anyone searching couldn't tell them apart and ours
+read like a clone. Renamed to **Claude Standby** (command `claude-standby`,
+alias `cs`): it names the behavior (stands by until the limit resets), keeps
+"Claude" for discoverability, and is distinct.
+
+**What changed (public identity):** the CLI command + binary
+(`bin/claude-standby`), the install dir default (`~/.claude-standby`), all
+repo URLs (`0xsaju/claude-standby`), the documented env-var namespace
+(`CLAUDE_AUTO_RESUME_*` → `CLAUDE_STANDBY_*`), the VS Code extension
+(id `claude-standby-cockpit`, display "Claude Standby Cockpit", command ids
+`claudeStandby.*`), and all living docs/prose.
+
+**Kept as documented legacy (invisible/internal, high-churn, zero brand
+exposure):** the runtime data dir `~/.claude/auto-resume/` (renaming it is a
+contract change per C3 with real state-orphaning risk — deferred, needs a
+migration), the `plugin/scripts/` dir name (already legacy per C3), internal
+shell prefixes `ar_*`/`AR_*`/`car_*`/`CAR_*`, and the real historical plugin
+id `claude-auto-resume@auto-resume` in the uninstall hint (that string was
+literally what old users installed — renaming it would misfire the hint).
+Append-only logs (this file, PROGRESS.md) keep their historical `claude-auto-
+resume` references rather than rewriting history.
+
+**Out-of-repo, owner-only (not done here):** rename the GitHub repo to
+`claude-standby` (GitHub auto-redirects the old URL for a while), and
+republish the extension under the new marketplace id (ids can't be renamed
+in place; existing installs won't auto-migrate). Until those happen, the
+production `curl` URL and the marketplace badges point at names that don't
+exist yet. `VERSION` bump + release tag recommended alongside (still 0.6.0).

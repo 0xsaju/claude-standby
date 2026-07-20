@@ -251,3 +251,14 @@ ARCHITECTURE's "MVP, run from source" cockpit line (it's published) and
 USER-GUIDE's "installs the repo" wording; README badge (0.6.0) matches
 VERSION; no remaining git-pull/hook/plugin claims outside historical
 entries. 254 tests green.
+
+**2026-07-20 — renamed to Claude Standby (D37).** Resolved the name
+collision with terryso/claude-auto-resume. Command is now `claude-standby`
+(alias `cs`); install dir `~/.claude-standby`; env vars `CLAUDE_STANDBY_*`;
+extension id `claude-standby-cockpit`. Kept as legacy: the `~/.claude/auto-
+resume/` data dir, `plugin/` scripts dir, and internal ar_/car_ prefixes.
+Done on branch `rename-claude-standby`, 254 tests green, live install/
+uninstall smoke-tested. **Owner still needs to:** rename the GitHub repo to
+claude-standby, republish the extension under the new marketplace id, and
+(recommended) bump VERSION + cut a release tag. Until the repo rename, the
+curl install URL and marketplace badges 404.
