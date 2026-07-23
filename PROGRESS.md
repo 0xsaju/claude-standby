@@ -344,3 +344,17 @@ installer test section pinned to CAR_SETUP_STATUSLINE=no so suite runs can
 never prompt or touch the real settings.json). USER-GUIDE §2 + extension
 CHANGELOG updated. Still pending from earlier today: cut the v0.9.1 release,
 package/republish the 0.9.2 vsix.
+
+## 2026-07-23 — Published v0.9.1 (engine) + ext-v0.9.2 tag
+
+Committed both slices (4586ee1) and published: GitHub Release v0.9.1 cut with
+the `claude-standby.tar.gz` asset — `latest/download` verified serving 0.9.1,
+so installs/updates (and the cockpit's update check) now get the D40 daemon
+fix. Pushed `ext-v0.9.2`; the publish workflow ran green but BOTH marketplace
+steps were SKIPPED — the repo has no `VSCE_PAT`/`OVSX_TOKEN` secrets. Handoff:
+extension 0.9.2 is packaged at `vscode-extension/claude-standby-cockpit-
+0.9.2.vsix`; to ship it either add those two secrets and re-run the workflow
+(Actions → Publish extension → Run workflow), or publish manually (`npx ovsx
+publish <vsix> -p <token>` / `npx @vscode/vsce publish --packagePath <vsix>
+-p <PAT>`). D40's fix gets its first real-world verification on the next
+actual limit hit.
