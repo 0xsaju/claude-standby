@@ -388,6 +388,12 @@ bash "$PLUGIN/scripts/daemon.sh" "$WS6"
 t_eq "daemon: exhausted cap fails fast" "failed" "$(ar_task_get "$WS6" status)"
 t_contains "daemon: cap journaled" "max_resumes" "$(ar_journal_show "$WS6" 5)"
 
+# rescheduling a spent task grants a fresh attempt budget (D43): the
+# carried-over count of a failed cycle must not trip the cap check above
+# before the new schedule's resume is ever attempted.
+(cd "$WS6" && AR_NO_DAEMON=1 bash "$PLUGIN/scripts/task-resume-at.sh" now >/dev/null)
+t_eq "schedule: reschedule resets the attempt budget" "0" "$(ar_task_get "$WS6" resume_count)"
+
 # auto mode: bare invocation schedules probe-based detection
 WS7="$DTMP/ws-auto"; mkdir -p "$WS7"
 OUT="$(cd "$WS7" && AR_NO_DAEMON=1 bash "$PLUGIN/scripts/task-resume-at.sh")"

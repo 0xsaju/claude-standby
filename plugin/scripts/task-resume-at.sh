@@ -199,9 +199,12 @@ fi
 # inherits a stale "already saw a limit" from a previous cycle (which
 # would let auto-detect resume a non-limited session immediately). For a
 # `reset` schedule you confirmed the limit yourself, so limit_seen=1.
+# resume_count is reset too (D43): a schedule is a fresh attempt budget —
+# carrying the spent count of a finished/failed cycle made the daemon
+# fail fast at the max_resumes cap without ever attempting the resume.
 LIMIT_SEEN_INIT=0
 [ -n "$CONFIRMED_LIMIT" ] && LIMIT_SEEN_INIT=1
-FIELDS=("status=waiting" "resume_at=$RESUME_AT" "resume_mode=$RESUME_MODE" "session_id=$SESSION_ID" "limit_seen=$LIMIT_SEEN_INIT" "limit_seen_at=" "armed_noted=0" "armed_since=" "daemon_pid=")
+FIELDS=("status=waiting" "resume_at=$RESUME_AT" "resume_mode=$RESUME_MODE" "session_id=$SESSION_ID" "resume_count=0" "limit_seen=$LIMIT_SEEN_INIT" "limit_seen_at=" "armed_noted=0" "armed_since=" "daemon_pid=")
 if [ -n "$PROMPT_ARG" ]; then
   FIELDS+=("resume_prompt_template=$PROMPT_ARG")
 fi

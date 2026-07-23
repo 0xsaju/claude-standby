@@ -373,3 +373,17 @@ release cut; 272 tests green (4 new update-offer tests; sensor tests now pin
 CLAUDE_STANDBY_STATE so markers never touch the real data dir). USER-GUIDE
 §2/§5 + D42. Extension still 0.9.2 (unchanged) — marketplace publish still
 blocked on the VSCE_PAT/OVSX_TOKEN repo secrets.
+
+## 2026-07-23 (later still) — Reschedule resets the attempt budget (D43), v0.9.3
+
+Field verification: user scheduled a DeenMate resume; on inspection the task
+carried resume_count=3 / max_resumes=3 from a prior failed cycle, so the
+daemon would trip the cap check at the scheduled instant and fail WITHOUT
+attempting — a reschedule that looked armed but was dead on arrival. Root
+cause: task-resume-at.sh reset limit_seen/armed_* on schedule (D27) but not
+resume_count. Fixed: resume_count=0 now in the schedule field set; +1
+regression test (273 green). VERSION 0.9.3, release cut. The user's live task
+was separately cancelled by them at 14:38 and the 15:11 window passed, so it
+needs a fresh reschedule under 0.9.3 (or a state.json repair) to clear the
+stale count. Extension still 0.9.2, marketplace publish still blocked on the
+VSCE_PAT/OVSX_TOKEN secrets.

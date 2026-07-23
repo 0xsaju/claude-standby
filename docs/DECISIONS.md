@@ -822,3 +822,25 @@ install silences future updates too.
 so existing users get the offer from their SECOND update after this
 release (the first delivers the new installer) — same one-release lag as
 the D39 counter migration.
+
+## D43 — 2026-07-23 — Rescheduling resets the attempt budget
+
+**Problem (field report).** A task that had exhausted `max_resumes` in a
+prior cycle (status `failed`, `resume_count=3`, `max_resumes=3`) was
+rescheduled. `resume-at` rewrote status/resume_at/session but left
+`resume_count` at its spent value. The daemon's cap check
+(`COUNT >= MAX`) therefore tripped at the scheduled instant and marked the
+task `failed` again — WITHOUT ever attempting the resume. A reschedule
+looked armed but was dead on arrival.
+
+**Decision.** `task-resume-at.sh` now includes `resume_count=0` in the
+field set it writes on every schedule, alongside the existing
+limit_seen/armed_* resets (D27). A schedule is a fresh attempt budget by
+definition; carrying a spent count from a finished cycle is never correct.
+`max_resumes` (the cap itself) is untouched — only the running tally
+resets. +1 regression test (reschedule after a pre-exhausted cap yields
+`resume_count=0`).
+
+**Live-state note.** Existing scheduled tasks written by <=0.9.2 still
+carry the stale count; cancelling and rescheduling under >=0.9.3 clears
+it, or the count can be repaired in state.json directly.
