@@ -298,3 +298,49 @@ Handoff: to publish the cockpit update, run `ovsx publish` (Open VSX) and upload
 the 0.9.1 vsix to VS Marketplace. Operational rule going forward: cut a fresh
 GitHub Release on every user-facing engine change, else `latest/download` lags
 `main` and the cockpit won't see the new version.
+
+## 2026-07-22 — Field report: resume burned its attempts against the next window's limit (D40)
+
+Root-caused the user's failed DeenMate resume from the cockpit journal: attempt
+1 *worked* — it continued the pinned session for ~8 minutes — then hit the NEXT
+5-hour window's limit ("resets 12:40am"). The failure path ignored that
+announced time and retried on the blind backoff (5 min × attempt), so attempts
+2 and 3 fired into the still-active limit and burned `max_resumes`. Fix (D40):
+the resume-failure path now parses the announced reset from the attempt's
+output (F1, same sanity window as the probe path) and reschedules to reset +
+grace, journaling `reset-detected`; blind backoff remains the fallback for
+unparseable output. VERSION 0.9.1 — **needs a fresh GitHub Release cut** (D39
+rule) so `latest/download` and the cockpit update check see it.
+
+Second field report: users without the status-line sensor never see the
+**At reset** chip (it was rendered only when a local reset snapshot exists), so
+the feature was undiscoverable. Cockpit 0.9.2: the chip always renders —
+disabled with a tooltip pointing at Setup when no snapshot — and the
+Auto-detect hint explains how to unlock it. Backfilled the missing 0.9.1
+CHANGELOG entry. USER-GUIDE retry sections updated; 263 tests green (4 new:
+bounce reschedules to the announced reset, waits, consumes one attempt,
+journals; existing backoff test pinned to an unparseable display).
+
+Handoff: engine fix + cockpit change are code-complete and tested. Still to
+do by the owner: cut the v0.9.1 release tag + tarball asset, package/republish
+the 0.9.2 vsix (Open VSX + VS Marketplace). C6 real-limit `--resume` proof
+remains open — though this field report is strong live evidence: attempt 1 DID
+continue session d52201ca headlessly after a real limit (worked 8 min before
+hitting the next window).
+
+## 2026-07-22 (later) — Sensor offered at install time (D41)
+
+Follow-up to the "At reset" discoverability fix: the user asked why the
+status-line sensor isn't part of install if the core experience leans on it.
+Answer preserved in D41 — it edits Claude Code's own settings.json, so it must
+stay consent-based — but it's now *offered* everywhere instead of hidden:
+`install.sh` prompts "Enable it? [Y/n]" on a tty (`CAR_SETUP_STATUSLINE=
+yes|no|ask` for scripts; silent already-registered path refresh; hint line
+when skipped; `--update` never prompts), and the cockpit Setup checklist has a
+neutral "Status-line sensor" row with one-click Enable (read-only settings
+grep for status, write via CLI, D21). setup-statusline.sh itself is unchanged
+except its header comment. 268 tests green (5 new installer-offer tests;
+installer test section pinned to CAR_SETUP_STATUSLINE=no so suite runs can
+never prompt or touch the real settings.json). USER-GUIDE §2 + extension
+CHANGELOG updated. Still pending from earlier today: cut the v0.9.1 release,
+package/republish the 0.9.2 vsix.

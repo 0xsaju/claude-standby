@@ -43,6 +43,15 @@ tool manages itself: `claude-standby update` / `uninstall` / `doctor`.
 (Re-running the curl command also updates; `... | bash -s -- --uninstall`
 also uninstalls.)
 
+The installer then **offers** the status-line sensor (recommended): answer
+`y` and resumes can be scheduled to your exact reset time (see §2.1). It's
+an offer, not a default — the sensor touches Claude Code's `settings.json`,
+so nothing is registered without your yes (any existing status line keeps
+working, chained; `claude-standby remove-statusline` reverts it). Scripted
+installs can pass `CAR_SETUP_STATUSLINE=yes` (or `no`); a pipe with no
+terminal skips the question and just prints the recommendation. The
+cockpit's Setup screen offers the same one-click **Enable**.
+
 Verify:
 
 ```sh
@@ -125,10 +134,13 @@ has its context. If your project keeps a progress/handoff file, a custom
 `--prompt` pointing at it makes resumes even more reliable.
 
 **Safety rails.** A task is resumed at most `max_resumes` times (default 3).
-If a resume attempt fails — most commonly because the limit hadn't actually
-reset yet — the daemon backs off (5 min × attempt number by default) and
-retries, still bounded by the cap. After the cap: status `failed`, you get
-notified, nothing runs again until you reschedule.
+If a resume attempt fails and the limit message announces the next reset
+time — the common case: the resumed session worked for a while, then ran
+into the *next* window's limit — the daemon waits for exactly that reset
+(+grace) before retrying. Without an announced time it backs off (5 min ×
+attempt number by default) and retries, still bounded by the cap. After the
+cap: status `failed`, you get notified, nothing runs again until you
+reschedule.
 
 ## 4. Workflows
 
@@ -418,8 +430,9 @@ set an allowlist (section 6).
 
 **It keeps retrying and failing.**
 The journal (via `claude-standby status`) shows each attempt's reason. A resume that
-bounces off a still-active limit backs off automatically; hitting the cap
-means the reset time you gave was too optimistic — schedule later.
+bounces off a still-active limit waits for the reset time the limit message
+announces (or backs off, if it doesn't announce one); hitting the cap means
+every window's worth of attempts ran out — schedule again when you're ready.
 
 **`claude-standby status` says no task, but I scheduled one.**
 Commands key by directory. Run them from the same directory you scheduled

@@ -401,6 +401,20 @@ function collectState() {
   // reliably from a GUI-launched editor (no login PATH), so we treat the
   // ~/.claude store as the honest signal that Claude Code is in use.
   const claudeFound = fs.existsSync(path.join(os.homedir(), '.claude'));
+  // Status-line sensor (F4): registered when Claude Code's settings.json
+  // carries the sensor command. Read-only check — enabling goes through
+  // the CLI (`setup-statusline`), same override the CLI honors.
+  let sensorRegistered = false;
+  try {
+    const settingsFile =
+      process.env.CLAUDE_SETTINGS_FILE ||
+      path.join(os.homedir(), '.claude', 'settings.json');
+    sensorRegistered = fs
+      .readFileSync(settingsFile, 'utf8')
+      .includes('plugin/scripts/statusline.sh');
+  } catch {
+    /* absent or unreadable -> not registered */
+  }
   // state.json is created on first use (first schedule), so on a
   // brand-new install it is simply ABSENT — which is fine, not broken. Only
   // a file that exists but won't parse is a real problem. Distinguish the
@@ -428,6 +442,7 @@ function collectState() {
     author,
     extVersion: EXT_VERSION,
     claudeFound,
+    sensorRegistered,
     stateHealthy,
     stateStatus,
     rate: readRate(),
@@ -457,6 +472,12 @@ const host = {
   openLog: () => openLog(),
   openConfig: () => openConfig(),
   installCli: () => installCli(),
+  setupSensor: async () => {
+    const res = await runCli(['setup-statusline']);
+    if (res.notFound) return offerInstall();
+    vscode.window.showInformationMessage(res.text.split('\n')[0]);
+    refreshAll();
+  },
 };
 
 // --------------------------------------------------------------- status bar --

@@ -351,14 +351,34 @@ ar_task_set "$WS4" status cancelled
 bash "$PLUGIN/scripts/daemon.sh" "$WS4"
 t_eq "daemon: cancelled task untouched" "cancelled" "$(ar_task_get "$WS4" status)"
 
-# daemon: repeated limit hits -> backoff then failed at max_resumes
+# daemon: repeated limit hits -> backoff then failed at max_resumes.
+# Display is unparseable ("soon"): with no announced reset time the failure
+# path must fall back to the blind backoff (0s here) and burn through the cap.
 WS5="$DTMP/ws-limited"; mkdir -p "$WS5"
 (cd "$WS5" && AR_NO_DAEMON=1 bash "$PLUGIN/scripts/task-resume-at.sh" now >/dev/null)
 ar_task_set "$WS5" max_resumes 2
-FAKE_CLAUDE_MODE=limit bash "$PLUGIN/scripts/daemon.sh" "$WS5"
+FAKE_CLAUDE_MODE=limit FAKE_CLAUDE_RESET_DISPLAY="soon" bash "$PLUGIN/scripts/daemon.sh" "$WS5"
 t_eq "daemon: limited resume ends failed" "failed" "$(ar_task_get "$WS5" status)"
 t_eq "daemon: attempts bounded by max_resumes" "2" "$(ar_task_get "$WS5" resume_count)"
 t_contains "daemon: backoff journaled" "resume-failed" "$(ar_journal_show "$WS5" 10)"
+
+# daemon: a resume that hits the limit again with an ANNOUNCED reset time
+# (F1) reschedules to that time (+grace) instead of the blind backoff —
+# retrying sooner would fire the remaining attempts into a still-active
+# limit and burn max_resumes. Display computed ~2h ahead (see WS10 note).
+_b2h=$(( $(date +%s) + 7200 ))
+_bdisp="$(TZ='Asia/Dhaka' date -r "$_b2h" '+%I:%M%p' 2>/dev/null || TZ='Asia/Dhaka' date -d "@$_b2h" '+%I:%M%p' 2>/dev/null)"
+_bdisp="$(printf '%s' "$_bdisp" | tr 'APM' 'apm') (Asia/Dhaka)"
+WS5B="$DTMP/ws-bounce-reset"; mkdir -p "$WS5B"
+(cd "$WS5B" && AR_NO_DAEMON=1 bash "$PLUGIN/scripts/task-resume-at.sh" now >/dev/null)
+FAKE_CLAUDE_MODE=limit FAKE_CLAUDE_RESET_DISPLAY="$_bdisp" \
+  AR_DAEMON_ONESHOT=1 AR_RESET_GRACE_SECS=0 bash "$PLUGIN/scripts/daemon.sh" "$WS5B"
+t_eq "daemon: limited bounce keeps waiting" "waiting" "$(ar_task_get "$WS5B" status)"
+t_eq "daemon: bounce consumed one attempt" "1" "$(ar_task_get "$WS5B" resume_count)"
+t_contains "daemon: bounce journaled announced reset" "reset-detected" "$(ar_journal_show "$WS5B" 10)"
+_bexpect="$(ar_parse_reset_time "resets $_bdisp")"
+_bgot="$(ar_iso_to_epoch "$(ar_task_get "$WS5B" resume_at)")"
+t_eq "daemon: bounce retries at the announced reset" "$_bexpect" "$_bgot"
 
 # daemon: pre-exhausted max_resumes -> failed without attempting
 WS6="$DTMP/ws-exhausted"; mkdir -p "$WS6"
@@ -861,6 +881,10 @@ rm -rf "$CTMP"
 
 ROOT="$(cd "$HERE/.." && pwd)"
 if command -v git >/dev/null 2>&1 && [ -d "$ROOT/.git" ]; then
+  # Never let the installer's sensor offer prompt (a dev terminal has a
+  # /dev/tty) or touch the real ~/.claude/settings.json; the sensor tests
+  # below opt in explicitly against an isolated settings file.
+  export CAR_SETUP_STATUSLINE=no
   ITMP="$(mktemp -d "${TMPDIR:-/tmp}/ar-test-XXXXXX")"
   ITMP="$(cd "$ITMP" && pwd)"
   TARBALL="$ITMP/src.tgz"
@@ -875,6 +899,28 @@ if command -v git >/dev/null 2>&1 && [ -d "$ROOT/.git" ]; then
   t_contains "installer: installed CLI runs through symlink" "No tracked task" "$OUT"
   OUT="$(CAR_TARBALL_URL="$TARBALL" CAR_INSTALL_DIR="$ITMP/app" CAR_BIN_DIR="$ITMP/bin" bash "$ROOT/install.sh" 2>&1)"
   t_contains "installer: re-run updates in place" "Updating existing install" "$OUT"
+
+  # statusline sensor offer (D41): opt-in at install time. Explicit yes
+  # registers into the given settings file (preserving unrelated keys);
+  # the default here is CAR_SETUP_STATUSLINE=no (exported above), which
+  # must leave settings untouched but print the recommendation.
+  ISL="$ITMP/sensor-settings.json"; printf '{"model": "opus"}\n' > "$ISL"
+  OUT="$(CAR_TARBALL_URL="$TARBALL" CAR_INSTALL_DIR="$ITMP/app" CAR_BIN_DIR="$ITMP/bin" \
+    CLAUDE_SETTINGS_FILE="$ISL" CAR_SETUP_STATUSLINE=yes bash "$ROOT/install.sh" 2>&1)"
+  t_contains "installer: sensor opt-in registers" "plugin/scripts/statusline.sh" "$(cat "$ISL")"
+  t_contains "installer: sensor opt-in preserves settings keys" '"model"' "$(cat "$ISL")"
+  OUT="$(CAR_TARBALL_URL="$TARBALL" CAR_INSTALL_DIR="$ITMP/app" CAR_BIN_DIR="$ITMP/bin" \
+    CLAUDE_SETTINGS_FILE="$ISL" bash "$ROOT/install.sh" 2>&1)"
+  case "$OUT" in
+    *"Recommended:  claude-standby setup-statusline"*)
+      fail "installer: no sensor hint once registered" "$OUT" ;;
+    *) ok "installer: no sensor hint once registered" ;;
+  esac
+  ISL2="$ITMP/sensor-settings-no.json"; printf '{"model": "opus"}\n' > "$ISL2"
+  OUT="$(CAR_TARBALL_URL="$TARBALL" CAR_INSTALL_DIR="$ITMP/app" CAR_BIN_DIR="$ITMP/bin" \
+    CLAUDE_SETTINGS_FILE="$ISL2" bash "$ROOT/install.sh" 2>&1)"
+  t_eq "installer: sensor default leaves settings alone" '{"model": "opus"}' "$(cat "$ISL2")"
+  t_contains "installer: sensor hint when not registered" "setup-statusline" "$OUT"
   # a corrupt download must never replace a working install
   printf 'garbage' > "$ITMP/bad.tgz"
   OUT="$(CAR_TARBALL_URL="$ITMP/bad.tgz" CAR_INSTALL_DIR="$ITMP/app" bash "$ROOT/install.sh" --update 2>&1)"; URC=$?

@@ -9,8 +9,9 @@
 # (that is how `claude-standby cancel` stops a pending resume: state
 # is the channel).
 #
-# Safety rails (C5): max_resumes enforced; failed resume attempts back off
-# (AR_BACKOFF_BASE_SECS * attempt) instead of hammering; importance tiers:
+# Safety rails (C5): max_resumes enforced; failed resume attempts wait for
+# the reset time the limit message announces (F1) when it has one, else back
+# off (AR_BACKOFF_BASE_SECS * attempt) instead of hammering; importance tiers:
 #   critical -> resume with no confirmation
 #   normal   -> notify, then auto-proceed after $AR_NORMAL_GRACE_SECS (300)
 #   low      -> notify only, never auto-resume
@@ -99,6 +100,9 @@ do_probe() {
   return 0
 }
 
+# Output of the last do_resume, kept so the failure path can extract an
+# announced reset time from a limit message (same as PROBE_OUT for probes).
+RESUME_OUT=""
 do_resume() {
   # $1: attempt number. Returns the claude exit code.
   local attempt="$1" session_id prompt out rc
@@ -121,6 +125,7 @@ do_resume() {
   # shellcheck disable=SC2086
   out="$(cd "$WS" 2>/dev/null && "$CLAUDE_BIN" "$@" $EXTRA_ARGS 2>&1)"
   rc=$?
+  RESUME_OUT="$out"
   ar_task_set "$WS" last_output_tail "$(printf '%s' "$out" | tail -c 1500)"
   ar_log "daemon[$$]: attempt $attempt exited $rc"
   # A resume that bounced off a still-active limit may still exit 0
@@ -351,9 +356,27 @@ while :; do
     stand_down "final attempt failed"
   fi
 
-  # Attempt failed (likely resumed too early and bounced off the limit):
-  # back off and keep waiting, still bounded by max_resumes.
-  NEXT_EPOCH=$(( $(date +%s) + BACKOFF_BASE * ATTEMPT ))
+  # Attempt failed. If the output carries the limit message WITH an announced
+  # reset time (measured format, HOOK-FINDINGS F1) — the resume bounced off a
+  # still-active limit, or worked for a while and ran into the NEXT window —
+  # wait for exactly that reset (+grace). A blind backoff here fires the
+  # remaining attempts into a limit that provably won't lift for hours and
+  # burns max_resumes for nothing. Same sanity window as the probe path.
+  NOW="$(date +%s)"
+  NEXT_EPOCH=""
+  case "$RESUME_OUT" in
+    *"$AR_LIMIT_PATTERN"*)
+      PARSED="$(ar_parse_reset_time "$RESUME_OUT")" || PARSED=""
+      if [ -n "$PARSED" ] && [ "$PARSED" -gt $((NOW + 60)) ] && [ "$PARSED" -lt $((NOW + 82800)) ]; then
+        NEXT_EPOCH=$((PARSED + RESET_GRACE))
+        ar_journal_append "$WS" "reset-detected" "attempt $ATTEMPT hit the limit again — message announces reset at $(ar_epoch_to_iso "$PARSED"); waiting for it (+${RESET_GRACE}s)"
+        ar_log "daemon[$$]: attempt $ATTEMPT limited; announced reset $(ar_epoch_to_iso "$PARSED"), retrying $(ar_epoch_to_iso "$NEXT_EPOCH")"
+      fi
+      ;;
+  esac
+  # No announced reset time (or an insane one): back off and keep waiting,
+  # still bounded by max_resumes.
+  [ -n "$NEXT_EPOCH" ] || NEXT_EPOCH=$(( NOW + BACKOFF_BASE * ATTEMPT ))
   NEXT_ISO="$(ar_epoch_to_iso "$NEXT_EPOCH")"
   ar_task_upsert "$WS" "status=waiting" "resume_at=$NEXT_ISO"
   ar_journal_append "$WS" "resume-failed" "attempt $ATTEMPT exited nonzero; retrying at $NEXT_ISO"

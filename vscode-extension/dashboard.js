@@ -102,6 +102,9 @@ function attach(webview, host) {
       case 'install':
         host.installCli();
         break;
+      case 'setupSensor':
+        await host.setupSensor();
+        break;
       case 'goSetup':
         _view = 'setup';
         update(host);
@@ -203,6 +206,7 @@ function stateSig(state) {
     k: state.stuckWs,
     c: state.cliFound,
     st: state.stateStatus,
+    sn: state.sensorRegistered,
     rt: state.rate,
     d: state.daemons,
     w: state.currentWs,
@@ -278,16 +282,20 @@ function sessionTitle(state, ws, id) {
 // Three visual states: ok (green ✓), pending (neutral dash — not yet but
 // not broken), and fail (red ✗, optionally with an action button). A
 // pending row is never shown in alarm colors so a fresh install stays calm.
-function setupRow(ok, title, mono, action, pending, pendingLabel) {
+function setupRow(ok, title, mono, action, pending, pendingLabel, pendingAct) {
   let glyphCls, glyph, status;
   if (ok) {
     glyphCls = 'c-green';
     glyph = CHECK;
     status = `<span class="c-green ck-lab">✓ ${esc(action || 'ready')}</span>`;
   } else if (pending) {
+    // Neutral, never alarming; pendingAct makes the row actionable (an
+    // optional-but-recommended step) instead of just informational.
     glyphCls = 'dim';
     glyph = DASH;
-    status = `<span class="dim ck-lab">${esc(pendingLabel || 'pending')}</span>`;
+    status = pendingAct
+      ? `<button class="btn-pri" data-act="${esc(pendingAct)}">${esc(pendingLabel || 'Enable')}</button>`
+      : `<span class="dim ck-lab">${esc(pendingLabel || 'pending')}</span>`;
   } else {
     glyphCls = 'c-red';
     glyph = CROSS;
@@ -341,6 +349,7 @@ function setupScreen(state) {
       ${setupRow(cliOk, 'Terminal CLI installed', 'claude-standby', cliOk ? 'installed' : 'install')}
       ${setupRow(claudeOk, 'Claude Code detected', '~/.claude', claudeOk ? 'found' : '')}
       ${setupRow(stateOk, 'State file', '~/.claude/auto-resume/state.json', stateOk ? 'healthy' : '', statePending, 'created on first schedule')}
+      ${setupRow(state.sensorRegistered, 'Status-line sensor — exact reset times ("At reset")', 'claude-standby setup-statusline', state.sensorRegistered ? 'registered' : '', !state.sensorRegistered, 'Enable', 'sensor')}
     </div>
 
     ${
@@ -371,7 +380,7 @@ function composerCard(idPrefix, ws, state, primary) {
     : '';
   const autoHint = ri
     ? `arm and watch: resume whenever you hit the limit — it'll use your reset time (<b>${esc(ri.time)}</b>) when the moment comes`
-    : "arm and watch: checks periodically until a limit hits and lifts, then resumes — it doesn't know your reset time in advance";
+    : "arm and watch: checks periodically until a limit hits and lifts, then resumes — it doesn't know your reset time in advance. <b>At reset</b> unlocks once the status-line sensor (Setup) has captured your reset time.";
   return `<div class="composer card" data-ws="${esc(ws || '')}" data-pinned="${esc(pinned || '')}" id="${idPrefix}">
     <div class="field">
       <label>Conversation</label>
@@ -388,7 +397,11 @@ function composerCard(idPrefix, ws, state, primary) {
     <div class="field">
       <label>When</label>
       <div class="when-row">
-        ${hasReset ? `<button class="chip selected" data-when="reset">At reset</button>` : ''}
+        ${
+          hasReset
+            ? `<button class="chip selected" data-when="reset">At reset</button>`
+            : `<button class="chip" data-when="reset" disabled title="Needs the status-line sensor: it captures your exact reset time locally. Enable it from Setup (top right), then hit a limit once.">At reset</button>`
+        }
         <button class="chip${hasReset ? '' : ' selected'}" data-when="auto">Auto-detect</button>
         <button class="chip" data-when="30m">30m</button>
         <button class="chip" data-when="1h">1h</button>
@@ -802,6 +815,8 @@ function render(state) {
     color: var(--vscode-foreground);
   }
   .chip:hover { border-color: var(--vscode-descriptionForeground); }
+  .chip:disabled { opacity: .45; cursor: not-allowed; }
+  .chip:disabled:hover { border-color: var(--vscode-input-border, var(--vscode-widget-border, rgba(128,128,128,.35))); }
   .chip.selected { border-color: #F59E0B; color: #F59E0B; background: rgba(245,158,11,.10); }
   .when-sep { width: 1px; height: 18px; background: var(--vscode-widget-border, rgba(128,128,128,.35)); margin: 0 4px; }
   .when-row.chip-active .t-hour, .when-row.chip-active .t-min, .when-row.chip-active .ampm { opacity: .4; }
@@ -902,6 +917,7 @@ ${body}
   $$('[data-act]').forEach((b) => b.addEventListener('click', () => {
     const a = b.dataset.act;
     if (a === 'install') send('install');
+    if (a === 'sensor') send('setupSensor');
   }));
 
   // CLI reference open/close is persisted host-side so the 5s refresh

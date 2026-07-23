@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # setup-statusline.sh — register/remove the status-line SENSOR in
 # ~/.claude/settings.json so the daemon can read the exact reset time from
-# rate.json (HOOK-FINDINGS F4). Opt-in: it touches your status line, so it is
-# never auto-registered on install.
+# rate.json (HOOK-FINDINGS F4). Opt-in: it touches your status line, so it
+# is never registered without consent — the installer and the cockpit's
+# Setup screen OFFER it (D41), but only an explicit yes lands here.
 #
 # Usage: setup-statusline.sh install | remove | status
 #

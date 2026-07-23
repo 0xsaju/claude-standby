@@ -754,3 +754,50 @@ low and converges as people update.
 else `latest/download` lags `main`. Tests are unaffected — they override
 `CAR_TARBALL_URL`, so they never hit the default. Branch/git paths remain as
 fallbacks in `fetch_tree` for machines without curl+tar.
+
+## D40 — 2026-07-22 — Failed resumes wait for the announced reset, not a blind backoff
+
+**Problem (field report).** A scheduled resume continued its session, worked
+for ~8 minutes, then hit the NEXT 5-hour window's limit ("resets 12:40am").
+The failure path retried on the blind backoff (5 min × attempt), so attempts
+2 and 3 fired straight into the still-active limit seconds apart and burned
+`max_resumes` — the task ended `failed` even though nothing was wrong.
+
+**Decision.** The resume-failure path now does what the probe path already
+did: when the attempt's output carries the limit message with an announced
+reset time (measured F1, same (now+60s, now+23h) sanity window), reschedule
+to that reset `+ AR_RESET_GRACE_SECS` and journal `reset-detected`. The
+blind backoff remains the fallback for output without a parseable time. A
+bounced attempt still consumes one of `max_resumes` (C5: the cap bounds
+total resumes fired, and with correct scheduling each attempt now lands in
+a window where it can actually work).
+
+**Also (cockpit 0.9.2).** The "At reset" chip was invisible without the
+status-line sensor, so users without the sensor never learned the feature
+existed. It now renders disabled with a tooltip pointing at Setup.
+
+## D41 — 2026-07-22 — The status-line sensor is offered at install time (still consent-based)
+
+**Problem (field report).** The sensor was pure opt-in and nothing ever
+surfaced it: the installer didn't mention it, and the cockpit hid the
+"At reset" chip entirely without it (see D40's companion fix). In practice
+almost nobody had it, so the flagship exact-reset experience — and the
+quota-free F4 detection path — went unused, and detection fell back to
+quota-burning probes (C6).
+
+**Why it was never auto-registered (unchanged).** Registration edits
+`~/.claude/settings.json` — Claude Code's own config, not ours. A curl
+installer silently rewriting another tool's settings violates the spirit of
+C4 (never break the host) and D20's settings-edit discipline. That line
+holds: consent is still required.
+
+**Decision.** Offer, don't impose, in both install paths:
+- `install.sh` asks "Enable it? [Y/n]" when a terminal is present
+  (`/dev/tty`), honoring `CAR_SETUP_STATUSLINE=yes|no|ask` (default ask)
+  for scripted installs; with no tty it just prints a recommendation line.
+  An already-registered sensor is silently path-refreshed (D35) and never
+  re-prompted. The `--update` path never prompts (the cockpit drives it).
+- The cockpit Setup checklist gains a neutral (never red — it's optional)
+  "Status-line sensor" row with a one-click **Enable** that runs
+  `claude-standby setup-statusline` via the CLI (D21: writes go through
+  the CLI; the registered/not check is a read-only settings.json grep).

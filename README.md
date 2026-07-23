@@ -9,8 +9,8 @@ session with context, and never makes you babysit a terminal again.
 
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey)
-![Version](https://img.shields.io/badge/version-0.9.0-informational)
-![Tests](https://img.shields.io/badge/tests-259%20passing-brightgreen)
+![Version](https://img.shields.io/badge/version-0.9.1-informational)
+![Tests](https://img.shields.io/badge/tests-268%20passing-brightgreen)
 ![Status](https://img.shields.io/badge/status-alpha-orange)
 [![VS Marketplace](https://img.shields.io/badge/VS_Marketplace-Install-0066b8?logo=visualstudiocode&logoColor=white)](https://marketplace.visualstudio.com/items?itemName=0xsaju.claude-standby-cockpit)
 [![Open VSX](https://img.shields.io/badge/Open_VSX-Install-a60ee5)](https://open-vsx.org/extension/0xsaju/claude-standby-cockpit)

@@ -4,6 +4,29 @@ All notable changes to the Claude Standby Cockpit extension. The
 extension is a thin UI over the `claude-standby` terminal tool, so some
 entries describe tool behavior the cockpit now surfaces.
 
+## 0.9.2
+
+- **Setup can enable the status-line sensor.** The Setup checklist gains a
+  "Status-line sensor — exact reset times" row with a one-click **Enable**
+  (runs `claude-standby setup-statusline`); shown as a neutral optional
+  step, never a red failure. The CLI installer now offers the same thing
+  at install time.
+- **"At reset" is now always visible.** Without the status-line sensor the
+  chip used to be hidden entirely, so most users never learned it existed.
+  It now shows disabled with a tooltip explaining that Setup's status-line
+  sensor unlocks it (the sensor is what captures your exact reset time
+  locally); the Auto-detect hint says the same.
+- (tool side) **Resumes that run into the next limit window now wait for
+  it.** When a resumed session hits a limit again and the message announces
+  the reset time, the daemon reschedules to exactly that time instead of
+  retrying on a short backoff — previously the remaining attempts fired
+  into the still-active limit and burned the max-resumes cap for nothing.
+
+## 0.9.1
+
+- **One-click CLI update.** The cockpit notices when a newer `claude-standby`
+  release is out and offers to run the update for you.
+
 ## 0.9.0
 
 - **Renamed to Claude Standby.** The project was `claude-auto-resume`, which
