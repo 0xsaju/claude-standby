@@ -906,6 +906,7 @@ if command -v git >/dev/null 2>&1 && [ -d "$ROOT/.git" ]; then
   # must leave settings untouched but print the recommendation.
   ISL="$ITMP/sensor-settings.json"; printf '{"model": "opus"}\n' > "$ISL"
   OUT="$(CAR_TARBALL_URL="$TARBALL" CAR_INSTALL_DIR="$ITMP/app" CAR_BIN_DIR="$ITMP/bin" \
+    CLAUDE_STANDBY_STATE="$ITMP/ar/state.json" \
     CLAUDE_SETTINGS_FILE="$ISL" CAR_SETUP_STATUSLINE=yes bash "$ROOT/install.sh" 2>&1)"
   t_contains "installer: sensor opt-in registers" "plugin/scripts/statusline.sh" "$(cat "$ISL")"
   t_contains "installer: sensor opt-in preserves settings keys" '"model"' "$(cat "$ISL")"
@@ -921,6 +922,26 @@ if command -v git >/dev/null 2>&1 && [ -d "$ROOT/.git" ]; then
     CLAUDE_SETTINGS_FILE="$ISL2" bash "$ROOT/install.sh" 2>&1)"
   t_eq "installer: sensor default leaves settings alone" '{"model": "opus"}' "$(cat "$ISL2")"
   t_contains "installer: sensor hint when not registered" "setup-statusline" "$OUT"
+
+  # the --update path offers the sensor too (D42): explicit yes registers
+  # and records the one-time "offered" marker; a registered sensor is
+  # quietly kept; the marker (or =no) means updates stay silent.
+  ISL3="$ITMP/sensor-update.json"; printf '{"model": "opus"}\n' > "$ISL3"
+  OUT="$(CAR_TARBALL_URL="$TARBALL" CAR_INSTALL_DIR="$ITMP/app" \
+    CLAUDE_STANDBY_STATE="$ITMP/ar-upd/state.json" \
+    CLAUDE_SETTINGS_FILE="$ISL3" CAR_SETUP_STATUSLINE=yes bash "$ROOT/install.sh" --update 2>&1)"
+  t_contains "installer: update registers sensor on yes" "plugin/scripts/statusline.sh" "$(cat "$ISL3")"
+  [ -f "$ITMP/ar-upd/statusline-offered" ] && ok "installer: update writes the offered marker" \
+    || fail "installer: update writes the offered marker"
+  OUT="$(CAR_TARBALL_URL="$TARBALL" CAR_INSTALL_DIR="$ITMP/app" \
+    CLAUDE_STANDBY_STATE="$ITMP/ar-upd/state.json" \
+    CLAUDE_SETTINGS_FILE="$ISL3" CAR_SETUP_STATUSLINE=ask bash "$ROOT/install.sh" --update 2>&1)"
+  t_contains "installer: update keeps a registered sensor" "plugin/scripts/statusline.sh" "$(cat "$ISL3")"
+  ISL4="$ITMP/sensor-update-marked.json"; printf '{"model": "opus"}\n' > "$ISL4"
+  OUT="$(CAR_TARBALL_URL="$TARBALL" CAR_INSTALL_DIR="$ITMP/app" \
+    CLAUDE_STANDBY_STATE="$ITMP/ar-upd/state.json" \
+    CLAUDE_SETTINGS_FILE="$ISL4" CAR_SETUP_STATUSLINE=ask bash "$ROOT/install.sh" --update 2>&1)"
+  t_eq "installer: update never re-asks once offered" '{"model": "opus"}' "$(cat "$ISL4")"
   # a corrupt download must never replace a working install
   printf 'garbage' > "$ITMP/bad.tgz"
   OUT="$(CAR_TARBALL_URL="$ITMP/bad.tgz" CAR_INSTALL_DIR="$ITMP/app" bash "$ROOT/install.sh" --update 2>&1)"; URC=$?

@@ -801,3 +801,24 @@ holds: consent is still required.
   "Status-line sensor" row with a one-click **Enable** that runs
   `claude-standby setup-statusline` via the CLI (D21: writes go through
   the CLI; the registered/not check is a read-only settings.json grep).
+
+## D42 — 2026-07-23 — `update` also offers the sensor, once
+
+**Problem.** D41 put the sensor offer in the fresh-install path — but
+existing users never rerun that path; they live on `claude-standby update`,
+which deliberately exited before any prompting. The population that most
+needed the offer could never see it.
+
+**Decision.** The `--update` path now calls the same offer with a
+once-ever guard: a registered sensor is quietly path-refreshed; an
+unregistered one triggers the `[Y/n]` question a single time, recorded in
+`$AR_HOME/statusline-offered` regardless of the answer, so updates never
+nag. `CAR_SETUP_STATUSLINE=yes|no` still overrides (yes also records the
+marker); no tty → silent skip. Fresh installs keep asking (an explicit
+user action may re-ask) but also record the marker, so declining at
+install silences future updates too.
+
+**Reach note.** `update` executes the *currently installed* install.sh,
+so existing users get the offer from their SECOND update after this
+release (the first delivers the new installer) — same one-release lag as
+the D39 counter migration.

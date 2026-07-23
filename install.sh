@@ -108,6 +108,48 @@ car_installed_version() {
   head -1 "$INSTALL_DIR/VERSION" 2>/dev/null | tr -d '[:space:]'
 }
 
+# --- status-line sensor offer (D41/D42) -------------------------------------
+# The sensor gives exact reset times (HOOK-FINDINGS F4) but edits Claude
+# Code's own settings.json, so it is OFFERED, never imposed (C4 spirit).
+# CAR_SETUP_STATUSLINE=yes|no|ask (default ask; "ask" needs a terminal).
+# Called with "always" on a fresh install (an explicit user action may
+# re-ask) and "once" on --update: a marker file remembers that the question
+# was ever asked, so updates never nag someone who already declined.
+SETTINGS_FILE="${CLAUDE_SETTINGS_FILE:-$HOME/.claude/settings.json}"
+AR_DATA="$(dirname "${CLAUDE_STANDBY_STATE:-$HOME/.claude/auto-resume/state.json}")"
+SENSOR_MARKER="$AR_DATA/statusline-offered"
+sensor_on() { grep -qs "plugin/scripts/statusline.sh" "$SETTINGS_FILE"; }
+mark_offered() { mkdir -p "$AR_DATA" 2>/dev/null && : > "$SENSOR_MARKER"; }
+offer_sensor() {
+  SENSOR_MODE="${CAR_SETUP_STATUSLINE:-ask}"
+  [ "$SENSOR_MODE" = "no" ] && return 0
+  if sensor_on; then
+    # Already opted in — quietly refresh in case the path went stale (D35).
+    bash "$INSTALL_DIR/plugin/scripts/setup-statusline.sh" install >/dev/null 2>&1 || true
+    return 0
+  fi
+  if [ "$SENSOR_MODE" = "yes" ]; then
+    mark_offered
+    bash "$INSTALL_DIR/plugin/scripts/setup-statusline.sh" install || true
+    return 0
+  fi
+  [ "$1" = "once" ] && [ -f "$SENSOR_MARKER" ] && return 0
+  [ -r /dev/tty ] || return 0
+  say ""
+  say "  Optional: enable the status-line sensor? It reads the exact"
+  say "  limit-reset time Claude Code already streams locally, so resumes"
+  say "  fire right at your reset — no probing, zero tokens. Any status"
+  say "  line you have keeps working (chained), and it's removable any"
+  say "  time with: claude-standby remove-statusline"
+  printf '  Enable it? [Y/n] '
+  IFS= read -r SENSOR_REPLY < /dev/tty || SENSOR_REPLY=""
+  mark_offered
+  case "$SENSOR_REPLY" in
+    [Nn]*) ;;
+    *) bash "$INSTALL_DIR/plugin/scripts/setup-statusline.sh" install || true ;;
+  esac
+}
+
 if [ "${1:-}" = "--uninstall" ]; then
   if [ -f "$INSTALL_DIR/plugin/scripts/setup-statusline.sh" ]; then
     bash "$INSTALL_DIR/plugin/scripts/setup-statusline.sh" remove 2>/dev/null | grep -v "nothing to remove" || true
@@ -137,6 +179,9 @@ if [ "${1:-}" = "--update" ]; then
   else
     say "Updated ${OLD_VER:-?} → ${NEW_VER:-?}."
   fi
+  # Updates reach users the fresh installer never sees (D42): refresh a
+  # registered sensor, or offer it ONE time — never nag on every update.
+  offer_sensor once
   exit 0
 fi
 
@@ -162,36 +207,7 @@ VER="$(car_installed_version)"
 # "Linked" line kept for scripts/tests that look for it; kept terse.
 say "Linked → $LINK"
 
-# Offer the status-line SENSOR (exact reset times, HOOK-FINDINGS F4). Still
-# opt-in — it edits Claude Code's own settings.json, which we never touch
-# without consent (C4 spirit) — but offered here because without it the
-# tool falls back to probing and the cockpit's "At reset" stays locked.
-# CAR_SETUP_STATUSLINE=yes|no|ask (default ask; "ask" needs a terminal —
-# a scripted install without one just gets the hint below).
-SETTINGS_FILE="${CLAUDE_SETTINGS_FILE:-$HOME/.claude/settings.json}"
-sensor_on() { grep -qs "plugin/scripts/statusline.sh" "$SETTINGS_FILE"; }
-SENSOR_MODE="${CAR_SETUP_STATUSLINE:-ask}"
-if [ "$SENSOR_MODE" != "no" ]; then
-  if sensor_on; then
-    # Already opted in — quietly refresh in case the path went stale (D35).
-    bash "$INSTALL_DIR/plugin/scripts/setup-statusline.sh" install >/dev/null 2>&1 || true
-  elif [ "$SENSOR_MODE" = "yes" ]; then
-    bash "$INSTALL_DIR/plugin/scripts/setup-statusline.sh" install || true
-  elif [ -r /dev/tty ]; then
-    say ""
-    say "  Optional: enable the status-line sensor? It reads the exact"
-    say "  limit-reset time Claude Code already streams locally, so resumes"
-    say "  fire right at your reset — no probing, zero tokens. Any status"
-    say "  line you have keeps working (chained), and it's removable any"
-    say "  time with: claude-standby remove-statusline"
-    printf '  Enable it? [Y/n] '
-    IFS= read -r SENSOR_REPLY < /dev/tty || SENSOR_REPLY=""
-    case "$SENSOR_REPLY" in
-      [Nn]*) ;;
-      *) bash "$INSTALL_DIR/plugin/scripts/setup-statusline.sh" install || true ;;
-    esac
-  fi
-fi
+offer_sensor always
 
 say ""
 say "  ✓  claude-standby ${VER:+v$VER} is ready"

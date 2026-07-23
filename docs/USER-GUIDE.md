@@ -50,7 +50,9 @@ so nothing is registered without your yes (any existing status line keeps
 working, chained; `claude-standby remove-statusline` reverts it). Scripted
 installs can pass `CAR_SETUP_STATUSLINE=yes` (or `no`); a pipe with no
 terminal skips the question and just prints the recommendation. The
-cockpit's Setup screen offers the same one-click **Enable**.
+cockpit's Setup screen offers the same one-click **Enable**, and
+`claude-standby update` asks the same question once for existing installs
+that never saw it (see §5).
 
 Verify:
 
@@ -333,6 +335,10 @@ work (claude missing).
 Updates the install in place: downloads a fresh copy, sanity-checks it,
 then swaps it in (no git involved — a failed download never leaves a
 broken install). Prints a one-line summary (`Updated 0.6.0 → 0.7.0.`).
+If the status-line sensor is registered it's quietly kept current; if it
+isn't, the update asks the same `[Y/n]` question as the installer — but
+only **once ever** (your answer is remembered, updates never nag; the
+same `CAR_SETUP_STATUSLINE=yes|no` override applies).
 If you're running from your own git clone of the repo, `update` refuses
 and tells you to `git pull` instead — it will never touch a development
 checkout.

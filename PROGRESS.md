@@ -358,3 +358,18 @@ extension 0.9.2 is packaged at `vscode-extension/claude-standby-cockpit-
 publish <vsix> -p <token>` / `npx @vscode/vsce publish --packagePath <vsix>
 -p <PAT>`). D40's fix gets its first real-world verification on the next
 actual limit hit.
+
+## 2026-07-23 (later) — `update` offers the sensor too (D42), v0.9.2 released
+
+Field question: old users never saw the D41 sensor offer — it lived only in
+the fresh-install path, and `--update` exited before any prompting. Now the
+offer is a shared function called from both paths: registered → silent
+path-refresh; unregistered → the [Y/n] question, but on update only ONCE
+ever (marker `$AR_HOME/statusline-offered`, written whenever the question is
+asked or CAR_SETUP_STATUSLINE=yes is used, so a decline is never re-nagged).
+Note the one-release lag: `update` runs the currently-installed installer, so
+existing users see the offer from their second update onward. VERSION 0.9.2,
+release cut; 272 tests green (4 new update-offer tests; sensor tests now pin
+CLAUDE_STANDBY_STATE so markers never touch the real data dir). USER-GUIDE
+§2/§5 + D42. Extension still 0.9.2 (unchanged) — marketplace publish still
+blocked on the VSCE_PAT/OVSX_TOKEN repo secrets.
