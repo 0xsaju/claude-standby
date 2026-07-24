@@ -2,7 +2,7 @@
   "name": "claude-standby-cockpit",
   "displayName": "Claude Standby Cockpit",
   "description": "Cockpit for claude-standby: auto-resume Claude Code tasks after usage-limit hits. Sidebar dashboard, status bar, one-click controls — the terminal tool does all the work.",
-  "version": "0.9.2",
+  "version": "0.9.4",
   "publisher": "0xsaju",
   "icon": "icon.png",
   "license": "MIT",
@@ -34,6 +34,15 @@
   "activationEvents": [
     "onStartupFinished"
   ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "The cockpit runs read-only over ~/.claude and dispatches through the claude-standby CLI. In an untrusted workspace the CLI path setting is ignored so a repo cannot repoint it at a malicious binary.",
+      "restrictedConfigurations": [
+        "claudeStandby.cliPath"
+      ]
+    }
+  },
   "contributes": {
     "viewsContainers": {
       "activitybar": [
@@ -136,7 +145,8 @@
         "claudeStandby.cliPath": {
           "type": "string",
           "default": "",
-          "description": "Path to the claude-standby CLI. Leave empty to auto-detect (PATH, then ~/.local/bin)."
+          "scope": "machine",
+          "description": "Path to the claude-standby CLI. Leave empty to auto-detect (PATH, then ~/.local/bin). Machine-scoped so an untrusted workspace cannot repoint it at a malicious binary; can only be set in User/Machine settings. (The Claude binary used by 'Open in Claude Code' comes from the CLAUDE_STANDBY_CLAUDE_BIN environment variable, likewise outside workspace control.)"
         },
         "claudeStandby.author.name": {
           "type": "string",

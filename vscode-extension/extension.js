@@ -1,7 +1,9 @@
 // Claude Standby Cockpit — pure UI over the claude-standby CLI and
-// its state file (~/.claude/auto-resume/state.json). This extension never
-// spawns or parses Claude Code itself (D21): reads come from state.json,
-// writes go through the CLI, so there is exactly one logic path.
+// its state file (~/.claude/auto-resume/state.json). Reads come from
+// state.json; scheduling/cancel writes go through the CLI (D21), so there is
+// one logic path for the engine's work. The single deliberate exception is
+// "Open in Claude Code" (openSession, D44): an id-validated interactive
+// `claude --resume` launch that the engine has no headless equivalent for.
 'use strict';
 
 const vscode = require('vscode');
@@ -15,6 +17,26 @@ const EXT_VERSION = require('./package.json').version;
 const AR_HOME = path.join(os.homedir(), '.claude', 'auto-resume');
 const STATE_FILE = path.join(AR_HOME, 'state.json');
 const LOG_FILE = path.join(AR_HOME, 'logs', 'plugin.log');
+// Where the daemon streams each resume's output (D44). The filename encodes the
+// workspace with the same [^A-Za-z0-9]->'-' rule the engine uses, so we can
+// derive it here without reimplementing its hash.
+const AR_LIVE_DIR = path.join(AR_HOME, 'live');
+
+// Set by the daily/manual CLI update check; surfaced as a red header alert.
+let _updatePending = false;
+
+function readLiveOutput(ws) {
+  if (!ws) return '';
+  try {
+    const f = path.join(AR_LIVE_DIR, ws.replace(/[^A-Za-z0-9]/g, '-') + '.out');
+    // The live file is truncated per resume attempt, so it stays small (and is
+    // plain output by default). Keep only the tail — the panel shows recent
+    // lines — so a long opt-in stream-json run can't bloat the webview payload.
+    return fs.readFileSync(f, 'utf8').slice(-8000);
+  } catch {
+    return '';
+  }
+}
 const CONFIG_FILE = path.join(AR_HOME, 'config');
 const INSTALL_CMD =
   'curl -fsSL https://raw.githubusercontent.com/0xsaju/claude-standby/main/install.sh | bash';
@@ -22,14 +44,39 @@ const INSTALL_CMD =
 const CONFIG_TEMPLATE = `# claude-standby configuration (shell syntax, AR_CFG_* only)
 # Docs: https://github.com/0xsaju/claude-standby/blob/main/docs/USER-GUIDE.md
 #
-# Extra CLI args for headless resumes (e.g. a permission allowlist):
+# Extra CLI args for headless resumes (e.g. a permission allowlist). Setting
+# this REPLACES the safe default allowlist below and takes full control:
 #AR_CFG_EXTRA_ARGS="--allowedTools Edit,Read,Bash(npm:*)"
+#
+# Default permission allowlist (C5). Applied ONLY when AR_CFG_EXTRA_ARGS is
+# unset, so an unattended resume can edit/read/search files but not run
+# arbitrary shell or reach the network. Set empty to opt out. Never enables
+# --dangerously-skip-permissions:
+#AR_CFG_DEFAULT_ALLOWED_TOOLS="Read,Edit,Write,Grep,Glob,LS,TodoWrite,NotebookRead,NotebookEdit"
+#
+# Quiet hours (C5), 24h LOCAL time as "HH" or "HH:MM". A resume that becomes
+# ready inside this window is deferred until it closes (never resumes earlier
+# than the reset). Off unless BOTH are set; supports crossing midnight
+# (e.g. 22:00-07:00):
+#AR_CFG_QUIET_START="22:00"
+#AR_CFG_QUIET_END="07:00"
+#
+# Progress-stall guard (C5). A resume that exits cleanly but leaves the
+# workspace progress file (progress_file, default PROGRESS.md) unchanged this
+# many times in a row is marked stuck/failed instead of "done". 0 disables:
+#AR_CFG_STALL_MAX="2"
 #
 # Claude binary the daemon invokes (default: claude):
 #AR_CFG_CLAUDE_BIN="claude"
 #
 # Model used for auto-mode limit probes (default: haiku):
 #AR_CFG_PROBE_MODEL="haiku"
+#
+# Live resume output granularity. Default is PLAIN output — the daemon's limit
+# detection stays on the measured format. Set to 1 for stream-json (a richer
+# per-step live panel in the cockpit), which runs detection on an unverified
+# format — opt in only if you want the granular live view:
+#AR_CFG_RESUME_STREAM="0"
 #
 # Path to an existing rate-limit cache to read the exact reset time from
 # (e.g. a status line that caches it). Zero setup — point us at your file.
@@ -60,6 +107,10 @@ function cliPath() {
 
 function runCli(args, cwd) {
   return new Promise((resolve) => {
+    // execFile (no shell): args are passed as an argv vector, so nothing in
+    // `args` can inject shell syntax. The only trust concern here is which
+    // BINARY runs — cliPath() — which we constrain to machine/user settings in
+    // package.json so an untrusted workspace can't repoint it (F11).
     cp.execFile(
       cliPath(),
       args,
@@ -73,6 +124,20 @@ function runCli(args, cwd) {
       }
     );
   });
+}
+
+// A terminal's sendText types raw text into a live shell, so any executable
+// path we splice into a command string must be neutralized first (F11). Reject
+// a path we can't safely type at all — a newline/carriage-return/NUL would
+// submit an extra line, i.e. run a second command — and POSIX single-quote the
+// rest so spaces or shell metacharacters can't break out of the argument.
+function safeExecPath(p) {
+  const s = String(p || '').trim();
+  if (!s || /[\r\n\0]/.test(s)) return null;
+  return s;
+}
+function shArg(s) {
+  return `'` + String(s).replace(/'/g, `'\\''`) + `'`;
 }
 
 // ------------------------------------------------------------- CLI update --
@@ -225,7 +290,13 @@ function refreshAll() {
 // Read-only here; the pick is executed by the CLI (`resume-at --session`).
 
 const PROJECTS_DIR = path.join(os.homedir(), '.claude', 'projects');
-const UUID_RE = /^[0-9a-fA-F-]{32,40}$/;
+// Canonical 8-4-4-4-12 hex UUID — the exact shape the engine's ar_is_uuid()
+// enforces (lib.sh). Kept identical here so the cockpit and the CLI agree on
+// what a session id is: no all-hyphen strings, bare prefixes, or over-long
+// ids slip through in either layer (F32). Used for both session-file discovery
+// and the pre-shell id check in openSession.
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function sessionSummary(file) {
   let fd;
@@ -277,6 +348,32 @@ function listSessions(ws) {
       .map((s) => ({ ...s, summary: sessionSummary(path.join(dir, `${s.id}.jsonl`)) }));
   } catch {
     return [];
+  }
+}
+
+// Build a single session entry by id. listSessions() only returns the 6
+// newest, so a pinned session that is older than that window (or whose file is
+// gone) would otherwise vanish from the composer — and scheduling would
+// silently swap the user's pin for the newest visible chat (F06). This lets
+// collectState re-inject the pinned session no matter its age.
+function sessionEntry(ws, id) {
+  const base = { id, mtime: 0, sizeKb: 0, summary: '' };
+  if (!ws) return base;
+  try {
+    const file = path.join(
+      PROJECTS_DIR,
+      ws.replace(/[^A-Za-z0-9]/g, '-'),
+      `${id}.jsonl`
+    );
+    const st = fs.statSync(file);
+    return {
+      id,
+      mtime: st.mtimeMs,
+      sizeKb: Math.round(st.size / 1024),
+      summary: sessionSummary(file),
+    };
+  } catch {
+    return base;
   }
 }
 
@@ -388,8 +485,18 @@ function collectState() {
   }
   const currentWs = workspacePath();
   const projects = listProjects(currentWs);
+  const allTasks = readAllTasks();
   const sessionsByWs = {};
-  for (const ws of projects) sessionsByWs[ws] = listSessions(ws);
+  for (const ws of projects) {
+    const list = listSessions(ws);
+    // Guarantee the pinned session is always selectable, even when it's older
+    // than the 6-item window listSessions caps at (F06).
+    const pinned = allTasks[ws] && allTasks[ws].session_id;
+    if (pinned && UUID_RE.test(pinned) && !list.some((s) => s.id === pinned)) {
+      list.unshift(sessionEntry(ws, pinned));
+    }
+    sessionsByWs[ws] = list;
+  }
   const cfg = vscode.workspace.getConfiguration('claudeStandby');
   const author = {
     name: cfg.get('author.name') || '',
@@ -445,6 +552,10 @@ function collectState() {
     sensorRegistered,
     stateHealthy,
     stateStatus,
+    updatePending: _updatePending,
+    // Live resume output for the open workspace, so a running resume is visible
+    // in the cockpit instead of only in a headless background process (D44).
+    liveOutput: readLiveOutput(currentWs),
     rate: readRate(),
     ready: cliFoundCache.value,
   };
@@ -477,6 +588,41 @@ const host = {
     if (res.notFound) return offerInstall();
     vscode.window.showInformationMessage(res.text.split('\n')[0]);
     refreshAll();
+  },
+  // Open the resumed conversation in a real Claude Code session so the user can
+  // SEE what the headless resume did (append-in-place, so --resume continues
+  // the same conversation). Runs in an integrated terminal (D44).
+  openSession: (ws) => {
+    const t = ws && readAllTasks()[ws];
+    const sid = t && t.session_id;
+    if (!sid) {
+      vscode.window.showWarningMessage(
+        'No pinned session for this workspace yet — nothing to open.'
+      );
+      return;
+    }
+    // sid is interpolated into a shell command run in a terminal — never trust
+    // it blindly (state.json could be hand-edited/corrupt). Claude session ids
+    // are canonical UUIDs (same shape the engine enforces, F32); refuse
+    // anything else rather than risk a shell injection.
+    if (!UUID_RE.test(sid)) {
+      vscode.window.showWarningMessage('Pinned session id looks malformed — not opening.');
+      return;
+    }
+    // The claude binary comes from the environment, not the untrusted
+    // workspace, but a path with spaces or metacharacters would still break or
+    // inject when typed into a terminal — validate and shell-quote it (F11).
+    const claude = safeExecPath(process.env.CLAUDE_STANDBY_CLAUDE_BIN || 'claude');
+    if (!claude) {
+      vscode.window.showWarningMessage(
+        'CLAUDE_STANDBY_CLAUDE_BIN is not a usable path — not opening.'
+      );
+      return;
+    }
+    const term = vscode.window.createTerminal({ name: `resume ${sid.slice(0, 8)}`, cwd: ws });
+    term.show(true);
+    // sid is a validated canonical UUID (safe charset), so it needs no quoting.
+    term.sendText(`${shArg(claude)} --resume ${sid}`, true);
   },
 };
 
@@ -687,9 +833,20 @@ function installCli() {
 
 // Run the CLI's own update in a visible terminal (download-validate-swap).
 function updateCli() {
+  // cliPath() can come from a configured path; validate + shell-quote it before
+  // typing it into a terminal so a path with spaces/metacharacters can't break
+  // or inject the command (F11). (Workspace overrides are already blocked by
+  // the machine scope on claudeStandby.cliPath in package.json.)
+  const cli = safeExecPath(cliPath());
+  if (!cli) {
+    vscode.window.showWarningMessage(
+      'claudeStandby.cliPath is not a usable path — cannot run update.'
+    );
+    return;
+  }
   const term = vscode.window.createTerminal('claude-standby update');
   term.show();
-  term.sendText(`${cliPath()} update`, true);
+  term.sendText(`${shArg(cli)} update`, true);
 }
 
 // Compare the installed CLI version against the latest GitHub release and, if
@@ -713,6 +870,8 @@ async function checkCliUpdate({ manual = false } = {}) {
     return;
   }
   if (compareVersions(latest, installed) > 0) {
+    _updatePending = true; // surfaced as a red header alert in the dashboard
+    refreshAll();
     const shown = parseVersion(latest).join('.');
     const have = (parseVersion(installed) || []).join('.') || 'unknown';
     const choice = await vscode.window.showInformationMessage(
@@ -722,6 +881,8 @@ async function checkCliUpdate({ manual = false } = {}) {
     );
     if (choice === 'Update') updateCli();
   } else if (manual) {
+    _updatePending = false;
+    refreshAll();
     vscode.window.showInformationMessage(
       `claude-standby is up to date (${(parseVersion(installed) || []).join('.')}).`
     );

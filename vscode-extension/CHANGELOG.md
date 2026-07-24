@@ -4,6 +4,42 @@ All notable changes to the Claude Standby Cockpit extension. The
 extension is a thin UI over the `claude-standby` terminal tool, so some
 entries describe tool behavior the cockpit now surfaces.
 
+## Unreleased
+
+- **Audit remediation (2026-07-24, D46).** A 36-finding independent audit
+  landed a batch of engine/cockpit hardening fixes — see `docs/DECISIONS.md`
+  D46 for the full list (session-resolution fail-closed, reschedule
+  preemption, numeric safety-rail validation, statusline sensor no-clobber,
+  webview escaping, terminal-argument quoting, and more). `package.json`
+  stays at `0.9.4` pending a release version bump; **the checked-in
+  `claude-standby-cockpit-0.9.4.vsix` predates this batch and must be
+  rebuilt from the current source tree before the next publish** (F31) —
+  do not ship the stale artifact.
+
+## 0.9.4
+
+- **See the resume run.** A running resume now shows a **live output panel**
+  in the dashboard (streamed from the headless run) plus a **▶ Open in Claude
+  Code** button that continues the very same conversation in a terminal — so a
+  long background resume is no longer invisible. (Requires CLI 0.9.4.) Output is
+  plain by default; set `AR_CFG_RESUME_STREAM=1` for a richer per-step
+  (stream-json) live view.
+- **Header alert marker.** A prominent red/amber pill in the top corner when
+  something needs attention: CLI missing, state file broken, a resume
+  interrupted, a CLI update available, or exact-reset detection not set up.
+- **Grace countdown is honest.** During the normal-tier grace window the
+  dashboard shows the actual "resumes at HH:MM," not a time that already passed.
+- **Fixed: composer reset while typing.** Entering a custom prompt / session /
+  time no longer gets wiped when the 5-second auto-refresh fires — refreshes
+  pause while you're editing.
+- **Pre-publish hardening (audit).** Fixed a live-panel crash on odd output, a
+  live panel that froze past ~8 KB, and an installer path that could enable the
+  status-line sensor without consent; the resume's live output is now **plain by
+  default** (stream-json is opt-in) so limit detection stays on a verified
+  format. See `docs/audit-0.9.4.md`.
+- The extension version now tracks the CLI version (both `0.9.4`); they move
+  together from here on. (0.9.3 was skipped to realign.)
+
 ## 0.9.2
 
 - **Setup can enable the status-line sensor.** The Setup checklist gains a

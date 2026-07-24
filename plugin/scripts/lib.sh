@@ -34,6 +34,39 @@ AR_NUMERIC_FIELDS=" resume_count max_resumes "
 
 AR_DEFAULT_RESUME_PROMPT="Limit reset. Continue from where you stopped."
 
+# state.json schema version this build writes (F22). Older on-disk files that
+# only added default-'' per-task fields stayed at 2, so both are accepted.
+AR_SCHEMA_VERSION=3
+AR_SUPPORTED_VERSIONS=" 2 3 "
+
+# Journal entries retained per task; older ones are dropped so state.json can
+# not grow without bound (F19). Resolved at use time (ar_journal_append) via the
+# standard env-wins-over-config chain and coerced through ar_uint (F25).
+AR_JOURNAL_MAX_FALLBACK=200
+
+# Canonical per-task default object, shared by every jq code path so a task
+# created by upsert and one auto-created by a journal-append are identical
+# (F21). References the jq var $defprompt (pass --arg defprompt ...).
+AR__DEFAULT_TASK_JQ='{
+    "session_id": "",
+    "status": "running",
+    "importance": "normal",
+    "original_prompt": "",
+    "resume_at": "",
+    "resume_mode": "at",
+    "resume_count": 0,
+    "max_resumes": 3,
+    "limit_seen": "0",
+    "limit_seen_at": "",
+    "armed_noted": "0",
+    "armed_since": "",
+    "daemon_pid": "",
+    "resume_prompt_template": $defprompt,
+    "last_output_tail": "",
+    "progress_file": "PROGRESS.md",
+    "journal": []
+  }'
+
 # Substring that identifies a limit message. MEASURED — cite:
 # docs/HOOK-FINDINGS.md F1 ("You've hit your session limit · resets ...").
 AR_LIMIT_PATTERN="hit your session limit"
@@ -64,6 +97,14 @@ ar_epoch_to_iso() {
   # $1: unix epoch seconds
   date -r "$1" '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null && return 0   # BSD
   date -d "@$1" '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null && return 0  # GNU
+  return 1
+}
+
+ar__date_field() {
+  # $1: epoch seconds, $2: strftime field (e.g. %H) -> value on stdout.
+  # BSD (date -r) then GNU (date -d @). rc 1 if neither works.
+  date -r "$1" "+$2" 2>/dev/null && return 0   # BSD
+  date -d "@$1" "+$2" 2>/dev/null && return 0  # GNU
   return 1
 }
 
@@ -104,11 +145,73 @@ ar_parse_reset_time() {
   printf '%s\n' "$target"
 }
 
+# ------------------------------------------------------------ quiet hours --
+# C5 quiet hours: an optional window of local time during which the daemon
+# DEFERS an otherwise-ready auto-resume until the window closes (never earlier
+# than the reset). Opt-in and OFF by default: both AR_CFG_QUIET_START and
+# AR_CFG_QUIET_END must be set (24h local "HH" or "HH:MM"). Windows that cross
+# midnight are supported (start > end, e.g. 22:00-07:00).
+
+ar__hhmm_to_min() {
+  # "HH" or "HH:MM" (24h) -> minutes since local midnight (0..1439) on stdout.
+  # rc 1 on malformed / out-of-range input (fail closed: caller disables the
+  # window). Base-10 forced so "08"/"09" are never read as octal.
+  local v="$1" h m
+  case "$v" in
+    *:*) h="${v%%:*}"; m="${v#*:}" ;;
+    *)   h="$v"; m=0 ;;
+  esac
+  case "$h" in ''|*[!0-9]*) return 1 ;; esac
+  case "$m" in ''|*[!0-9]*) return 1 ;; esac
+  h=$((10#$h)); m=$((10#$m))
+  [ "$h" -ge 0 ] && [ "$h" -le 23 ] || return 1
+  [ "$m" -ge 0 ] && [ "$m" -le 59 ] || return 1
+  printf '%s\n' $((h * 60 + m))
+}
+
+ar_quiet_window_end() {
+  # $1: reference epoch (default now). If it falls INSIDE the configured quiet
+  # window, print the epoch at which the window closes (rc 0). Otherwise print
+  # nothing (rc 1). Disabled (rc 1) unless both AR_CFG_QUIET_START and
+  # AR_CFG_QUIET_END parse and differ.
+  local now="${1:-$(date +%s)}" start end smin emin
+  start="${AR_CFG_QUIET_START:-}"
+  end="${AR_CFG_QUIET_END:-}"
+  [ -n "$start" ] && [ -n "$end" ] || return 1
+  smin="$(ar__hhmm_to_min "$start")" || return 1
+  emin="$(ar__hhmm_to_min "$end")" || return 1
+  [ "$smin" -eq "$emin" ] && return 1   # zero-length window => disabled
+  local nh nm ns nmin midnight
+  nh="$(ar__date_field "$now" %H)" || return 1
+  nm="$(ar__date_field "$now" %M)" || return 1
+  ns="$(ar__date_field "$now" %S)" || ns=0
+  nh=$((10#$nh)); nm=$((10#$nm)); ns=$((10#$ns))
+  nmin=$((nh * 60 + nm))
+  # Local midnight for the reference instant, so the window end can be turned
+  # back into an absolute epoch without another date parse.
+  midnight=$((now - (nh * 3600 + nm * 60 + ns)))
+  if [ "$smin" -lt "$emin" ]; then
+    if [ "$nmin" -ge "$smin" ] && [ "$nmin" -lt "$emin" ]; then
+      printf '%s\n' $((midnight + emin * 60)); return 0
+    fi
+  else
+    # Crosses midnight: in-window on the evening side (>= start, ends tomorrow)
+    # or the morning side (< end, ends today).
+    if [ "$nmin" -ge "$smin" ]; then
+      printf '%s\n' $((midnight + 86400 + emin * 60)); return 0
+    elif [ "$nmin" -lt "$emin" ]; then
+      printf '%s\n' $((midnight + emin * 60)); return 0
+    fi
+  fi
+  return 1
+}
+
 # --------------------------------------------------------------- logging --
 
 ar_log() {
-  mkdir -p "$AR_LOG_DIR" 2>/dev/null || return 0
-  printf '%s %s\n' "$(ar_now_iso)" "$*" >> "$AR_LOG_DIR/plugin.log" 2>/dev/null || true
+  ar__ensure_private_dir "$AR_LOG_DIR" 2>/dev/null || return 0
+  ( umask 077; printf '%s %s\n' "$(ar_now_iso)" "$*" >> "$AR_LOG_DIR/plugin.log" ) 2>/dev/null || true
+  chmod 600 "$AR_LOG_DIR/plugin.log" 2>/dev/null || true
 }
 
 # ---------------------------------------------------------------- notify --
@@ -143,34 +246,69 @@ ar_notify() {
 # ---------------------------------------------------- JSON string helpers --
 
 ar_json_escape() {
-  # $1 -> JSON string contents (no surrounding quotes)
+  # $1 -> JSON string contents (no surrounding quotes). Emits well-formed
+  # JSON: backslash/quote/tab/CR get their short escapes, every other C0
+  # control byte (U+0000..U+001F, e.g. U+0001) becomes \u00XX, and a real
+  # newline between input records becomes \n. Char-by-char so a literal
+  # backslash-n round-trips as \\n, not a corrupt \n (F21).
   printf '%s' "$1" | awk '
-    BEGIN { ORS = ""; first = 1 }
+    BEGIN {
+      ORS = ""; first = 1
+      for (i = 0; i < 256; i++) ord[sprintf("%c", i)] = i
+    }
     {
       if (!first) printf "\\n"
       first = 0
-      s = $0
-      gsub(/\\/, "\\\\", s)
-      gsub(/"/, "\\\"", s)
-      gsub(/\t/, "\\t", s)
-      gsub(/\r/, "\\r", s)
-      printf "%s", s
+      s = $0; n = length(s)
+      for (j = 1; j <= n; j++) {
+        c = substr(s, j, 1); b = ord[c]
+        if (c == "\\") printf "\\\\"
+        else if (c == "\"") printf "\\\""
+        else if (c == "\t") printf "\\t"
+        else if (c == "\r") printf "\\r"
+        else if (b != "" && (b + 0) < 32) printf "\\u%04x", (b + 0)
+        else printf "%s", c
+      }
     }'
 }
 
 ar_json_unescape() {
-  # Best-effort inverse for the text tier (see DECISIONS D2 caveat).
+  # Inverse of ar_json_escape for the text tier: single left-to-right pass so
+  # \\ is consumed before an following n is misread as a newline (F21).
+  # Decodes \n \t \r \" \\ \/ and \u00XX (control-range) back to raw bytes.
   printf '%s' "$1" | awk '
-    BEGIN { ORS = "" }
+    BEGIN {
+      ORS = ""
+      hex = "0123456789abcdef"
+      for (i = 0; i < 16; i++) {
+        d = substr(hex, i + 1, 1); hv[d] = i; hv[toupper(d)] = i
+      }
+    }
     {
       if (NR > 1) printf "\n"
-      s = $0
-      gsub(/\\n/, "\n", s)
-      gsub(/\\t/, "\t", s)
-      gsub(/\\r/, "\r", s)
-      gsub(/\\"/, "\"", s)
-      gsub(/\\\\/, "\\", s)
-      printf "%s", s
+      s = $0; n = length(s)
+      for (j = 1; j <= n; j++) {
+        c = substr(s, j, 1)
+        if (c == "\\" && j < n) {
+          d = substr(s, j + 1, 1)
+          if (d == "n") { printf "\n"; j++ }
+          else if (d == "t") { printf "\t"; j++ }
+          else if (d == "r") { printf "\r"; j++ }
+          else if (d == "\"") { printf "\""; j++ }
+          else if (d == "\\") { printf "\\"; j++ }
+          else if (d == "/") { printf "/"; j++ }
+          else if (d == "u" && j + 5 <= n) {
+            h = substr(s, j + 2, 4)
+            code = hv[substr(h,1,1)] * 4096 + hv[substr(h,2,1)] * 256 \
+                 + hv[substr(h,3,1)] * 16 + hv[substr(h,4,1)]
+            printf "%c", code
+            j += 5
+          }
+          else printf "%s", c
+        } else {
+          printf "%s", c
+        }
+      }
     }'
 }
 
@@ -183,6 +321,27 @@ ar__is_numeric_field() {
 
 ar__is_number() {
   printf '%s' "$1" | grep -q '^[0-9][0-9]*$'
+}
+
+ar_uint() {
+  # Validate/coerce a value to a bounded NON-NEGATIVE INTEGER, failing closed
+  # on garbage (F20/F25). Used for safety caps (max_resumes) and timing config.
+  #   $1: value  $2: fallback (default 0)  $3: optional inclusive max (clamp)
+  # Prints the resulting integer on stdout. Returns 0 when $1 was already a
+  # clean in-range non-negative integer, 1 when it had to fall back or clamp —
+  # so callers can either trust the printed value or notice the coercion.
+  local v="$1" def="${2:-0}" max="${3:-}" out rc=0
+  case "$v" in
+    ''|*[!0-9]*) out="$def"; rc=1 ;;
+    *) out=$((10#$v)) ;;   # base-10 so leading zeros never mean octal
+  esac
+  case "$out" in ''|*[!0-9]*) out=0 ;; esac   # sanitize a garbage fallback too
+  if [ -n "$max" ]; then
+    case "$max" in ''|*[!0-9]*) max="" ;; esac
+    if [ -n "$max" ] && [ "$out" -gt "$max" ]; then out="$max"; rc=1; fi
+  fi
+  printf '%s\n' "$out"
+  return $rc
 }
 
 # ------------------------------------------------------------ state: core --
@@ -201,13 +360,72 @@ ar_json_engine() {
   fi
 }
 
+ar__ensure_private_dir() {
+  # Create $1 (and parents) owner-only. Runtime data holds prompts, session
+  # ids, and output tails, so it must not be world-readable (F13). Existing
+  # dirs are tightened best-effort. Never fails the caller loudly.
+  [ -n "$1" ] || return 1
+  if [ -d "$1" ]; then
+    chmod 700 "$1" 2>/dev/null
+    return 0
+  fi
+  ( umask 077; mkdir -p "$1" ) 2>/dev/null
+  chmod 700 "$1" 2>/dev/null
+  [ -d "$1" ]
+}
+
+# ---------------------------------------------- state: read-modify-write lock --
+# A whole read-modify-write of state.json (upsert/journal-append) is NOT atomic
+# on its own — every writer reads, edits, then replaces the entire file, so
+# concurrent writers lose each other's updates (F15). Serialize the transaction
+# with a mkdir-based mutex: mkdir is atomic on POSIX filesystems and works on
+# bash 3.2/macOS with no flock dependency (C2).
+
+ar__lock_dir() { printf '%s\n' "${AR_STATE_FILE}.lock"; }
+
+ar_lock_acquire() {
+  # Best-effort mutex. rc 0 on acquire, 1 on give-up. A lock older than
+  # AR_LOCK_STALE seconds is presumed abandoned (writer died) and stolen.
+  local d now age i=0
+  local wait_ticks stale
+  wait_ticks="$(ar_uint "${AR_LOCK_WAIT:-100}" 100)"   # * ~0.1s ≈ 10s
+  stale="$(ar_uint "${AR_LOCK_STALE:-30}" 30)"          # seconds
+  d="$(ar__lock_dir)"
+  ar__ensure_private_dir "$(dirname "$AR_STATE_FILE")"
+  while :; do
+    if ( umask 077; mkdir "$d" ) 2>/dev/null; then
+      printf '%s\n' "$$" > "$d/pid" 2>/dev/null
+      return 0
+    fi
+    now="$(date +%s 2>/dev/null || echo 0)"
+    age="$(ar__file_mtime "$d" 2>/dev/null)"; age="${age:-$now}"
+    if [ "$((now - age))" -ge "$stale" ]; then
+      rm -rf "$d" 2>/dev/null
+      continue
+    fi
+    i=$((i + 1))
+    if [ "$i" -ge "$wait_ticks" ]; then
+      ar_log "WARN: state lock wait timed out ($d)"
+      return 1
+    fi
+    sleep 0.1 2>/dev/null || sleep 1
+  done
+}
+
+ar_lock_release() {
+  rm -f "$(ar__lock_dir)/pid" 2>/dev/null
+  rmdir "$(ar__lock_dir)" 2>/dev/null || true
+}
+
 ar_state_write() {
   # stdin -> state file, atomically (temp file in same dir + mv).
-  # Refuses to clobber state with empty content.
-  mkdir -p "$(dirname "$AR_STATE_FILE")" 2>/dev/null
+  # Refuses to clobber state with empty content. Files/dirs stay owner-only (F13).
+  ar__ensure_private_dir "$(dirname "$AR_STATE_FILE")"
   local tmp="$AR_STATE_FILE.tmp.$$"
-  if cat > "$tmp" 2>/dev/null && [ -s "$tmp" ]; then
+  if ( umask 077; cat > "$tmp" ) 2>/dev/null && [ -s "$tmp" ]; then
+    chmod 600 "$tmp" 2>/dev/null
     mv "$tmp" "$AR_STATE_FILE"
+    chmod 600 "$AR_STATE_FILE" 2>/dev/null
   else
     rm -f "$tmp" 2>/dev/null
     ar_log "ERROR: state write failed (empty content or unwritable dir)"
@@ -217,38 +435,70 @@ ar_state_write() {
 
 ar_state_init() {
   [ -f "$AR_STATE_FILE" ] && return 0
-  ar_state_write <<'EOF'
+  ar_state_write <<EOF
 {
-  "version": 2,
+  "version": $AR_SCHEMA_VERSION,
   "tasks": {},
   "commands": []
 }
 EOF
 }
 
+ar_state_health() {
+  # Classify the loaded state so doctor/daemon can fail closed (F22).
+  # Prints one of: ok | corrupt | unsupported | missing.
+  # rc: 0 ok, 1 corrupt, 2 unsupported, 3 missing.
+  local f="${1:-$AR_STATE_FILE}" eng ver
+  [ -f "$f" ] || { printf 'missing\n'; return 3; }
+  eng="$(ar_json_engine)"
+  case "$eng" in
+    jq)
+      if ! jq -e '(.tasks|type)=="object" and (.commands|type)=="array" and (.version|type)=="number"' \
+           "$f" >/dev/null 2>&1; then
+        printf 'corrupt\n'; return 1
+      fi
+      ver="$(jq -r '.version' "$f" 2>/dev/null)"
+      ;;
+    python3)
+      ver="$(python3 - "$f" <<'PY' 2>/dev/null
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+except Exception:
+    print("__CORRUPT__"); raise SystemExit
+if (not isinstance(d, dict)
+        or not isinstance(d.get("tasks"), dict)
+        or not isinstance(d.get("commands"), list)
+        or isinstance(d.get("version"), bool)
+        or not isinstance(d.get("version"), int)):
+    print("__CORRUPT__"); raise SystemExit
+print(d["version"])
+PY
+)"
+      if [ "$ver" = "__CORRUPT__" ] || [ -z "$ver" ]; then
+        printf 'corrupt\n'; return 1
+      fi
+      ;;
+    *)
+      # text tier: coarse structural check on the canonical layout.
+      if ! grep -q '"tasks"' "$f" 2>/dev/null || ! grep -q '"commands"' "$f" 2>/dev/null; then
+        printf 'corrupt\n'; return 1
+      fi
+      ver="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$f" 2>/dev/null | head -1)"
+      [ -n "$ver" ] || { printf 'corrupt\n'; return 1; }
+      ;;
+  esac
+  case "$AR_SUPPORTED_VERSIONS" in
+    *" $ver "*) printf 'ok\n'; return 0 ;;
+    *)          printf 'unsupported\n'; return 2 ;;
+  esac
+}
+
 # ------------------------------------------------------- state: jq engine --
 
 ar__jq_upsert() {
   local ws="$1"; shift
-  local prog='.tasks[$ws] = (.tasks[$ws] // {
-    "session_id": "",
-    "status": "running",
-    "importance": "normal",
-    "original_prompt": "",
-    "resume_at": "",
-    "resume_mode": "at",
-    "resume_count": 0,
-    "max_resumes": 3,
-    "limit_seen": "0",
-    "limit_seen_at": "",
-    "armed_noted": "0",
-    "armed_since": "",
-    "daemon_pid": "",
-    "resume_prompt_template": $defprompt,
-    "last_output_tail": "",
-    "progress_file": "PROGRESS.md",
-    "journal": []
-  })'
+  local prog=".tasks[\$ws] = (.tasks[\$ws] // $AR__DEFAULT_TASK_JQ)"
   local args=(--arg ws "$ws" --arg defprompt "$AR_DEFAULT_RESUME_PROMPT")
   local i=0 pair f v
   for pair in "$@"; do
@@ -306,9 +556,13 @@ elif op == "upsert":
         t[f] = v
     print(json.dumps(state, indent=2))
 elif op == "journal":
-    ws, ts, event, detail = rest
+    ws, ts, event, detail = rest[0], rest[1], rest[2], rest[3]
+    cap = int(rest[4]) if len(rest) > 4 and rest[4].isdigit() else 0
     t = tasks.setdefault(ws, dict(DEFAULTS))
-    t.setdefault("journal", []).append({"ts": ts, "event": event, "detail": detail})
+    j = t.setdefault("journal", [])
+    j.append({"ts": ts, "event": event, "detail": detail})
+    if cap > 0 and len(j) > cap:
+        t["journal"] = j[-cap:]
     print(json.dumps(state, indent=2))
 elif op == "list":
     for k in tasks:
@@ -435,9 +689,54 @@ ar__text_upsert() {
   printf '%s\n' "$content"
 }
 
+ar__text_journal_trim() {
+  # stdin: state content; $1: ws, $2: cap -> content with ws's journal kept to
+  # its last $2 entries (F19). A no-op when $2 <= 0 or the journal is short.
+  # The text engine writes each entry as ONE line, so trimming keeps the last N
+  # single-line entries. To stay safe if the file was written by jq/python
+  # (which pretty-print each entry over several lines), the trim BAILS to a
+  # verbatim pass-through unless every entry is a single line — it never
+  # corrupts a multi-line entry.
+  [ "${2:-0}" -gt 0 ] 2>/dev/null || { cat; return 0; }
+  AR_K="    \"$(ar_json_escape "$1")\": {" AR_MAX="$2" awk '
+    BEGIN { key = ENVIRON["AR_K"]; max = ENVIRON["AR_MAX"] + 0 }
+    { L[NR] = $0 }
+    END {
+      n = NR
+      # locate the target task, then its journal open/close lines
+      ts = 0
+      for (i = 1; i <= n; i++) if (L[i] == key) { ts = i; break }
+      if (!ts) { for (i = 1; i <= n; i++) print L[i]; exit }
+      js = 0; je = 0
+      for (i = ts + 1; i <= n; i++) {
+        if (L[i] == "      \"journal\": [") { js = i; continue }
+        if (js && (L[i] == "      ]" || L[i] == "      ],")) { je = i; break }
+        if (!js && (L[i] == "    }" || L[i] == "    },")) break   # empty/[] journal
+      }
+      if (!js || !je) { for (i = 1; i <= n; i++) print L[i]; exit }
+      # are all entries single-line? count them
+      allsingle = 1; cnt = 0
+      for (i = js + 1; i < je; i++) {
+        e = L[i]; sub(/,$/, "", e)
+        if (e ~ /^        \{.*\}$/) cnt++
+        else { allsingle = 0; break }
+      }
+      if (!allsingle || cnt <= max) { for (i = 1; i <= n; i++) print L[i]; exit }
+      keepfrom = (js + 1) + (cnt - max)
+      for (i = 1; i <= n; i++) {
+        if (i > js && i < je) {
+          if (i < keepfrom) continue
+          e = L[i]; sub(/,$/, "", e)
+          print e ((i < je - 1) ? "," : "")
+        } else print L[i]
+      }
+    }
+  '
+}
+
 ar__text_journal_append() {
-  # $1: ws, $2: ts, $3: event, $4: detail -> new content on stdout
-  local ws="$1" entry
+  # $1: ws, $2: ts, $3: event, $4: detail, $5: journal cap -> new content on stdout
+  local ws="$1" entry max="${5:-0}"
   entry="{ \"ts\": \"$(ar_json_escape "$2")\", \"event\": \"$(ar_json_escape "$3")\", \"detail\": \"$(ar_json_escape "${4:-}")\" }"
   local content
   content="$(cat "$AR_STATE_FILE")"
@@ -467,7 +766,7 @@ ar__text_journal_append() {
     intask && ($0 == "    }" || $0 == "    },") { intask = 0 }
     $0 == key && !done { intask = 1 }
     { print }
-  '
+  ' | ar__text_journal_trim "$ws" "$max"
 }
 
 ar__text_journal_show() {
@@ -508,10 +807,13 @@ ar_task_exists() {
 
 ar_task_upsert() {
   # $1: workspace, rest: field=value pairs. Creates the task with schema
-  # defaults if missing, then applies the pairs. Atomic write.
+  # defaults if missing, then applies the pairs. The whole read-modify-write
+  # is serialized under the state lock so concurrent writers don't clobber each
+  # other (F15). Atomic write.
   local ws="$1"; shift
   ar_state_init || return 1
-  local eng new
+  ar_lock_acquire || return 1
+  local eng new rc=0
   eng="$(ar_json_engine)"
   case "$eng" in
     jq) new="$(ar__jq_upsert "$ws" "$@")" ;;
@@ -520,9 +822,12 @@ ar_task_upsert() {
   esac
   if [ -z "$new" ]; then
     ar_log "ERROR: task upsert produced no output (engine=$eng ws=$ws)"
-    return 1
+    rc=1
+  else
+    printf '%s\n' "$new" | ar_state_write; rc=$?
   fi
-  printf '%s\n' "$new" | ar_state_write
+  ar_lock_release
+  return $rc
 }
 
 ar_task_set() {
@@ -531,25 +836,36 @@ ar_task_set() {
 }
 
 ar_journal_append() {
-  # $1: workspace, $2: event, $3: detail
-  local ws="$1" event="$2" detail="${3:-}" ts eng new
+  # $1: workspace, $2: event, $3: detail. Serialized under the state lock (F15);
+  # the journal is capped so state.json can't grow unbounded (F19). All engines
+  # auto-create the task with identical schema defaults when it is missing (F21).
+  local ws="$1" event="$2" detail="${3:-}" ts eng new rc=0 cap
   ts="$(ar_now_iso)"
+  cap="$(ar_uint "${CLAUDE_STANDBY_JOURNAL_MAX:-${AR_CFG_JOURNAL_MAX:-$AR_JOURNAL_MAX_FALLBACK}}" 200 1000000)"
   ar_state_init || return 1
+  ar_lock_acquire || return 1
   eng="$(ar_json_engine)"
   case "$eng" in
     jq)
-      new="$(jq --arg ws "$ws" --arg ts "$ts" --arg e "$event" --arg d "$detail" \
-        '(.tasks[$ws].journal) |= ((. // []) + [{"ts": $ts, "event": $e, "detail": $d}])' \
+      new="$(jq --arg ws "$ws" --arg defprompt "$AR_DEFAULT_RESUME_PROMPT" \
+        --arg ts "$ts" --arg e "$event" --arg d "$detail" --argjson cap "$cap" \
+        ".tasks[\$ws] = (.tasks[\$ws] // $AR__DEFAULT_TASK_JQ)
+         | .tasks[\$ws].journal =
+             (((.tasks[\$ws].journal) // []) + [{\"ts\": \$ts, \"event\": \$e, \"detail\": \$d}]
+              | if length > \$cap then .[length - \$cap:] else . end)" \
         "$AR_STATE_FILE" 2>/dev/null)"
       ;;
-    python3) new="$(ar__py journal "$ws" "$ts" "$event" "$detail")" ;;
-    *) new="$(ar__text_journal_append "$ws" "$ts" "$event" "$detail")" ;;
+    python3) new="$(ar__py journal "$ws" "$ts" "$event" "$detail" "$cap")" ;;
+    *) new="$(ar__text_journal_append "$ws" "$ts" "$event" "$detail" "$cap")" ;;
   esac
   if [ -z "$new" ]; then
     ar_log "ERROR: journal append produced no output (engine=$eng ws=$ws)"
-    return 1
+    rc=1
+  else
+    printf '%s\n' "$new" | ar_state_write; rc=$?
   fi
-  printf '%s\n' "$new" | ar_state_write
+  ar_lock_release
+  return $rc
 }
 
 # ------------------------------------------------- Claude Code sessions --
@@ -632,9 +948,154 @@ ar_session_latest() {
   printf '%s\n' "$id"
 }
 
+# ------------------------------------ canonical session identity (F32/F03) --
+# One place that decides what a valid session id is and whether a session
+# belongs to a workspace, so the CLI, daemon, and cockpit stop drifting.
+
+ar_is_uuid() {
+  # rc 0 iff $1 is a canonical 8-4-4-4-12 hex UUID. REJECTS an all-hyphen
+  # string, a bare prefix, and anything with non-hex bytes (F03/F32).
+  printf '%s' "$1" | grep -Eq \
+    '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+}
+
+ar_session_match_prefix() {
+  # $1: workspace, $2: prefix. FIXED-STRING (never regex) prefix match against
+  # this workspace's session ids. Prints the single match (rc 0). ERRORS on
+  # ambiguity (rc 2) instead of silently picking the newest; rc 1 when none —
+  # never a fallback (F03). An exact full-id match always wins.
+  local ws="$1" pfx="$2" id match="" count=0
+  [ -n "$pfx" ] || return 1
+  while IFS= read -r id; do
+    [ -n "$id" ] || continue
+    if [ "$id" = "$pfx" ]; then printf '%s\n' "$id"; return 0; fi
+    case "$id" in
+      "$pfx"*) match="$id"; count=$((count + 1)) ;;   # $pfx quoted -> literal
+    esac
+  done <<EOF
+$(ar_sessions_list "$ws" | cut -f1)
+EOF
+  [ "$count" -eq 0 ] && return 1
+  if [ "$count" -gt 1 ]; then
+    ar_log "session prefix '$pfx' is ambiguous ($count matches) — refusing"
+    return 2
+  fi
+  printf '%s\n' "$match"
+}
+
+ar_session_cwd() {
+  # $1: workspace, $2: session id -> the `cwd` recorded in that transcript
+  # (F2), or empty (rc 1). Reads only the first few lines (files can be huge).
+  local dir f
+  dir="$(ar_project_dir "$1")"
+  f="$dir/$2.jsonl"
+  [ -f "$f" ] || return 1
+  if command -v python3 >/dev/null 2>&1; then
+    head -5 "$f" 2>/dev/null | python3 -c '
+import json, sys
+for line in sys.stdin:
+    try:
+        o = json.loads(line)
+    except Exception:
+        continue
+    if isinstance(o, dict) and o.get("cwd"):
+        print(o["cwd"]); break
+' 2>/dev/null
+  else
+    head -5 "$f" 2>/dev/null | sed -n 's/.*"cwd":[[:space:]]*"\([^"]*\)".*/\1/p' | head -1
+  fi
+}
+
+ar_session_belongs() {
+  # rc 0 iff session $2's transcript records a `cwd` equal to workspace $1.
+  # FAIL-CLOSED: a missing transcript, missing cwd, or mismatch is rc nonzero,
+  # so another workspace's session can never be accepted (F03).
+  local ws="$1" id="$2" cwd
+  cwd="$(ar_session_cwd "$ws" "$id")" || return 1
+  [ -n "$cwd" ] || return 1
+  [ "$cwd" = "$ws" ]
+}
+
+ar_session_resolve() {
+  # $1: workspace, $2: requested session ("" = newest, an exact UUID, or a
+  # fixed-string prefix). Prints the resolved id ONLY after cross-checking it
+  # belongs to this workspace (rc 0). Fail-closed otherwise — never silently
+  # substitutes another session:
+  #   rc 1 nothing matched / no session   rc 2 ambiguous prefix
+  #   rc 3 resolved id's transcript cwd != workspace
+  # NOTE: the "empty means newest" policy here is a convenience; a caller that
+  # must refuse an implicit session (require an explicit --session) should test
+  # "$2" itself before calling. Passing a literal "new" is NOT handled here —
+  # that's the CLI's start-fresh path, not a resolvable existing session.
+  local ws="$1" req="$2" id
+  if [ -n "$req" ]; then
+    if ar_is_uuid "$req"; then
+      id="$req"
+    else
+      id="$(ar_session_match_prefix "$ws" "$req")" || return $?
+    fi
+  else
+    id="$(ar_session_latest "$ws")" || return 1
+  fi
+  ar_session_belongs "$ws" "$id" || return 3
+  printf '%s\n' "$id"
+}
+
 ar_daemon_pidfile() {
   # $1: workspace -> the pidfile path its daemon uses (D11)
   printf '%s/daemons/%s.pid\n' "$AR_HOME" "$(printf '%s' "$1" | cksum | awk '{print $1}')"
+}
+
+ar_path_digest() {
+  # $1 -> a stable, collision-resistant hex digest of the string. Prefers a
+  # real hash (SHA-1/MD5); falls back to cksum(CRC32)+byte-count only when no
+  # hasher exists. Deterministic across runs so a derived filename is stable.
+  local s="$1" d=""
+  if command -v shasum >/dev/null 2>&1; then
+    d="$(printf '%s' "$s" | shasum 2>/dev/null | awk '{print $1}')"
+  elif command -v sha1sum >/dev/null 2>&1; then
+    d="$(printf '%s' "$s" | sha1sum 2>/dev/null | awk '{print $1}')"
+  elif command -v md5 >/dev/null 2>&1; then
+    d="$(printf '%s' "$s" | md5 2>/dev/null)"
+  elif command -v md5sum >/dev/null 2>&1; then
+    d="$(printf '%s' "$s" | md5sum 2>/dev/null | awk '{print $1}')"
+  fi
+  if [ -z "$d" ]; then
+    d="$(printf '%s' "$s" | cksum | awk '{print $1"-"$2}')"
+  fi
+  printf '%s\n' "$d"
+}
+
+ar_resume_live_file() {
+  # $1: workspace -> the file a resume streams its output to, live (D44).
+  # Host-local (not contract data). Keyed by a collision-resistant digest of
+  # the workspace path so distinct workspaces that differ only in punctuation
+  # (a-b vs a_b vs a/b) can't collide onto the same file (F17). The cockpit
+  # must NOT reimplement this hash — it derives the path via the CLI (the
+  # `output` command reads it; expose a path accessor in the CLI for P3).
+  printf '%s/live/%s.out\n' "$AR_HOME" "$(ar_path_digest "$1")"
+}
+
+ar_progress_fingerprint() {
+  # $1: workspace -> a cheap digest of that workspace's progress file (the file
+  # named by the task's progress_file field, default PROGRESS.md), so the daemon
+  # can tell whether a resume actually CHANGED anything (C5 stall detection).
+  # Content-only (cksum + byte count) so an identical rewrite is still "no
+  # progress". A missing/empty file yields the sentinel "none" — the caller
+  # then declines to judge progress, avoiding a false stall on repos that keep
+  # no progress file. Never fails the caller.
+  local ws="$1" pf f
+  pf="$(ar_task_get "$ws" progress_file 2>/dev/null)"
+  [ -n "$pf" ] || pf="PROGRESS.md"
+  case "$pf" in
+    /*) f="$pf" ;;
+    *)  f="$ws/$pf" ;;
+  esac
+  if [ -s "$f" ]; then
+    cksum < "$f" 2>/dev/null | awk '{print $1"-"$2}'
+  else
+    printf 'none\n'
+  fi
 }
 
 # ------------------------------------------- rate-limit snapshot (F4) --
@@ -654,7 +1115,9 @@ ar_rate_file() {
   if [ -n "${AR_CFG_RATE_SOURCE:-}" ] && [ -f "$AR_CFG_RATE_SOURCE" ]; then printf '%s\n' "$AR_CFG_RATE_SOURCE"; return 0; fi
   if [ -f "$AR_HOME/rate.json" ]; then printf '%s\n' "$AR_HOME/rate.json"; return 0; fi
   common="/tmp/claude_rate_cache_${USER:-$(id -un 2>/dev/null)}.json"
-  if [ -f "$common" ]; then printf '%s\n' "$common"; return 0; fi
+  # Only trust the predictable world-writable-dir cache if WE own it — an
+  # attacker who pre-creates it must not be able to steer detection (F13).
+  if [ -f "$common" ] && [ -O "$common" ]; then printf '%s\n' "$common"; return 0; fi
   printf '%s\n' "$AR_HOME/rate.json"   # default (may not exist yet)
 }
 

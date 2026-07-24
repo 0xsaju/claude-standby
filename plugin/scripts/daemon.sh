@@ -28,47 +28,110 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 WS="${1:-}"
 [ -n "$WS" ] || exit 0
 
-TICK="${AR_DAEMON_TICK_SECS:-60}"
-GRACE="${AR_NORMAL_GRACE_SECS:-300}"
+# All timing/threshold env is coerced to a bounded non-negative integer via the
+# lib.sh validator (F25): a blank, negative, fractional, or non-numeric value
+# would otherwise reach sleep/arithmetic and either kill the daemon under set -u
+# or spin a tight loop that burns quota (C6). Each falls back to its documented
+# default and is capped at a sane ceiling.
+TICK="$(ar_uint "${AR_DAEMON_TICK_SECS:-60}" 60 86400)"
+# The tick gates every sleep in the wait loop; 0 would busy-spin. Floor at 1s.
+[ "$TICK" -ge 1 ] || TICK=60
+GRACE="$(ar_uint "${AR_NORMAL_GRACE_SECS:-300}" 300 86400)"
 # Safety buffer added AFTER a detected/announced reset before we actually
 # attempt the resume. A resume fired at the exact reset instant (or a second
 # early, from clock skew or the server rounding the window up) bounces off a
 # still-active limit and wastes an attempt; waiting a beat avoids that.
-RESET_GRACE="${AR_RESET_GRACE_SECS:-${AR_CFG_RESET_GRACE:-60}}"
-# Never resume BEFORE the reset: a negative buffer would fire into a still-active
-# limit. Clamp to >= 0 (also guards a non-numeric value).
-case "$RESET_GRACE" in ''|*[!0-9]*) RESET_GRACE=60 ;; esac
-BACKOFF_BASE="${AR_BACKOFF_BASE_SECS:-300}"
-PROBE_INTERVAL="${AR_PROBE_INTERVAL_SECS:-1800}"
+# Never negative (would fire into a still-active limit) — ar_uint fails closed.
+RESET_GRACE="$(ar_uint "${AR_RESET_GRACE_SECS:-${AR_CFG_RESET_GRACE:-60}}" 60 86400)"
+BACKOFF_BASE="$(ar_uint "${AR_BACKOFF_BASE_SECS:-300}" 300 86400)"
+# Interval between reset probes; 0 would probe every tick with no pacing and
+# burn quota (C6). Floor at 1s.
+PROBE_INTERVAL="$(ar_uint "${AR_PROBE_INTERVAL_SECS:-1800}" 1800 86400)"
+[ "$PROBE_INTERVAL" -ge 1 ] || PROBE_INTERVAL=1800
 PROBE_MODEL="${AR_PROBE_MODEL:-${AR_CFG_PROBE_MODEL:-haiku}}"
-AUTO_GIVEUP="${AR_AUTO_GIVEUP_SECS:-21600}"
+AUTO_GIVEUP="$(ar_uint "${AR_AUTO_GIVEUP_SECS:-21600}" 21600 604800)"
 # How long an auto-detect task stays armed (no limit ever observed) before
 # it stands down instead of probing forever and burning quota (C6). 0 = no
 # bound (probe until a limit appears or the user cancels). Default 24h.
-ARMED_MAX="${AR_ARMED_MAX_SECS:-86400}"
+ARMED_MAX="$(ar_uint "${AR_ARMED_MAX_SECS:-86400}" 86400 604800)"
 # Auto mode uses the status-line sensor's rate.json (HOOK-FINDINGS F4) for the
 # exact reset TIME once a limit is confirmed (quota-free). LIMIT_PCT is the
 # used_percentage at which the sensor treats the account as limited (UNVERIFIED
 # at a real limit — default 100, the conservative choice). Below it, we do NOT
-# trust "not limited": a probe confirms (F4 must not blind F1).
-LIMIT_PCT="${AR_LIMIT_PCT:-100}"
+# trust "not limited": a probe confirms (F4 must not blind F1). A percentage,
+# so it is capped at 100.
+LIMIT_PCT="$(ar_uint "${AR_LIMIT_PCT:-100}" 100 100)"
 CLAUDE_BIN="${CLAUDE_STANDBY_CLAUDE_BIN:-${AR_CFG_CLAUDE_BIN:-claude}}"
 EXTRA_ARGS="${CLAUDE_STANDBY_EXTRA_ARGS:-${AR_CFG_EXTRA_ARGS:-}}"
+# C5 — DEFAULT PERMISSION ALLOWLIST. An unattended headless resume must not run
+# wide open. When the user supplied NO EXTRA_ARGS of their own, inject a
+# conservative default allowlist so a resumed session can keep making
+# file-level progress (read/edit/write/search/navigate) but CANNOT run
+# arbitrary shell commands or reach the network without the user opting in via
+# their own AR_CFG_EXTRA_ARGS. Tune the set with AR_CFG_DEFAULT_ALLOWED_TOOLS,
+# or set it empty to opt out. We NEVER add --dangerously-skip-permissions (C5).
+# The `-` (not `:-`) default lets an explicit empty value opt out under set -u.
+DEFAULT_ALLOWED_TOOLS="${AR_CFG_DEFAULT_ALLOWED_TOOLS-Read,Edit,Write,Grep,Glob,LS,TodoWrite,NotebookRead,NotebookEdit}"
+if [ -z "$EXTRA_ARGS" ] && [ -n "$DEFAULT_ALLOWED_TOOLS" ]; then
+  EXTRA_ARGS="--allowedTools $DEFAULT_ALLOWED_TOOLS"
+  ar_log "daemon[$$]: no EXTRA_ARGS set — applying conservative default permission allowlist ($DEFAULT_ALLOWED_TOOLS)"
+fi
 
 # One daemon per workspace: pidfile keyed by a hash of the path (kept
 # outside state.json — the pid is host-local, not contract data; D11).
+#
+# Mutual exclusion is via an atomic lock DIRECTORY, not a bare "test then
+# write" on the pidfile (F16): mkdir is atomic on POSIX filesystems, so two
+# daemons racing to start can never both win, and the old check-then-write
+# TOCTOU (both see no live pidfile, both write, both run) is closed. The lock
+# records the owning pid so only its owner ever removes it, and an abandoned
+# lock (owner dead, or created but never populated and now stale) is reclaimed.
 mkdir -p "$AR_HOME/daemons" 2>/dev/null
 PIDFILE="$(ar_daemon_pidfile "$WS")"
-if [ -f "$PIDFILE" ]; then
-  OLD_PID="$(cat "$PIDFILE" 2>/dev/null)"
-  if [ -n "$OLD_PID" ] && kill -0 "$OLD_PID" 2>/dev/null; then
-    ar_log "daemon: pid $OLD_PID already watches $WS — exiting"
-    exit 0
-  fi
+LOCKDIR="$PIDFILE.lock"
+
+ar_daemon_lock_acquire() {
+  # rc 0 = acquired (we own LOCKDIR); rc 1 = a live daemon already owns it.
+  local owner now age i=0 stale=30
+  while :; do
+    if mkdir "$LOCKDIR" 2>/dev/null; then
+      printf '%s\n' "$$" > "$LOCKDIR/pid" 2>/dev/null
+      return 0
+    fi
+    owner="$(cat "$LOCKDIR/pid" 2>/dev/null)"
+    if [ -n "$owner" ] && kill -0 "$owner" 2>/dev/null; then
+      return 1   # another live daemon holds it
+    fi
+    # No live owner recorded. Do NOT steal immediately: the winner of a mkdir
+    # race writes its pid a moment later, and stealing that fresh lock would
+    # let two daemons run. Only reclaim a lock old enough to look abandoned.
+    now="$(date +%s 2>/dev/null || echo 0)"
+    age="$(ar__file_mtime "$LOCKDIR" 2>/dev/null)"; age="${age:-$now}"
+    if [ "$((now - age))" -ge "$stale" ]; then
+      rm -rf "$LOCKDIR" 2>/dev/null
+      continue
+    fi
+    i=$((i + 1))
+    [ "$i" -ge 50 ] && return 1
+    sleep 0.1 2>/dev/null || sleep 1
+  done
+}
+
+ar_daemon_lock_release() {
+  # Only the owner tears the lock down, so a recycled pid or a racing daemon
+  # can never delete a lock it does not hold (F16).
+  [ "$(cat "$LOCKDIR/pid" 2>/dev/null)" = "$$" ] || return 0
+  rm -f "$LOCKDIR/pid" 2>/dev/null
+  rmdir "$LOCKDIR" 2>/dev/null || true
+}
+
+if ! ar_daemon_lock_acquire; then
+  ar_log "daemon: another daemon already watches $WS — exiting"
+  exit 0
 fi
 printf '%s\n' "$$" > "$PIDFILE"
-trap 'rm -f "$PIDFILE"' EXIT
-trap 'rm -f "$PIDFILE"; exit 0' TERM INT
+trap 'ar_daemon_lock_release; rm -f "$PIDFILE"' EXIT
+trap 'ar_daemon_lock_release; rm -f "$PIDFILE"; exit 0' TERM INT
 
 ar_log "daemon[$$]: watching $WS (tick=${TICK}s)"
 AUTO_START="$(date +%s)"
@@ -85,18 +148,24 @@ stand_down() {
 
 PROBE_OUT=""
 do_probe() {
-  # Reset detection with a minimal cheap call (D13). "Still limited" means
-  # nonzero exit OR the measured limit message in the output — exit codes
-  # alone are not trusted because claude may exit 0 while limited
-  # (HOOK-FINDINGS F1: exit code unmeasured). Output is kept in PROBE_OUT
-  # so the caller can extract the announced reset time.
+  # Reset detection with a minimal cheap call (D13). Three outcomes:
+  #   rc 0 = NOT limited (clean run, no limit message)
+  #   rc 1 = LIMITED  — the MEASURED F1 message is present (HOOK-FINDINGS F1)
+  #   rc 2 = ERROR    — the probe failed for some OTHER reason (missing binary,
+  #                     network, auth) with no F1 message
+  # C1 is strict here: ONLY the F1 message may establish "limited" — a nonzero
+  # exit code on its own must NOT be read as a rate limit (F23), because that
+  # would set limit_seen off an unrelated failure and later authorize a resume
+  # of a perfectly healthy session. So we match the message FIRST, and only
+  # then fall back to the exit code to tell "clean" from "errored". Output is
+  # kept in PROBE_OUT so the caller can extract the announced reset time.
   local rc
   PROBE_OUT="$("$CLAUDE_BIN" -p "ok" --model "$PROBE_MODEL" 2>&1)"
   rc=$?
-  [ "$rc" -ne 0 ] && return 1
   case "$PROBE_OUT" in
     *"$AR_LIMIT_PATTERN"*) return 1 ;;
   esac
+  [ "$rc" -ne 0 ] && return 2
   return 0
 }
 
@@ -104,13 +173,34 @@ do_probe() {
 # announced reset time from a limit message (same as PROBE_OUT for probes).
 RESUME_OUT=""
 do_resume() {
-  # $1: attempt number. Returns the claude exit code.
+  # $1: attempt number. Return codes:
+  #   0   = resume ran and exited cleanly
+  #   1   = resume ran and failed (nonzero exit, or bounced off the limit)
+  #   2   = ABORTED before invoking claude because the schedule generation
+  #         changed under us (a reschedule) — the caller must re-service, NOT
+  #         count this as an attempt (F05)
+  #   3   = ABORTED before invoking claude because a safety-critical state
+  #         write failed — fail closed, do NOT run claude (F24)
   local attempt="$1" session_id prompt out rc
   session_id="$(ar_task_get "$WS" session_id)"
   prompt="$(ar_task_get "$WS" resume_prompt_template)"
   [ -n "$prompt" ] || prompt="$AR_DEFAULT_RESUME_PROMPT"
 
-  ar_task_upsert "$WS" "status=resuming" "resume_count=$attempt"
+  # F05: if the schedule we committed to service was rescheduled while we were
+  # getting here, abandon this (now stale) resume before touching anything.
+  if [ -n "${SERVICE_GEN:-}" ] && [ "$(ar_task_get "$WS" resume_generation)" != "$SERVICE_GEN" ]; then
+    ar_log "daemon[$$]: generation moved before resuming attempt $attempt — abandoning stale resume (F05)"
+    return 2
+  fi
+
+  # F24: the transition to status=resuming with the incremented attempt is
+  # safety-critical — it is how max_resumes is enforced and how the cockpit
+  # sees an in-flight resume. If it cannot be persisted, we must NOT invoke
+  # claude off an unrecorded attempt; fail closed instead.
+  if ! ar_task_upsert "$WS" "status=resuming" "resume_count=$attempt"; then
+    ar_log "daemon[$$]: could not record resuming transition for attempt $attempt — refusing to invoke claude (F24 fail-closed)"
+    return 3
+  fi
   if [ -n "$session_id" ]; then
     ar_journal_append "$WS" "resumed" "attempt $attempt of $MAX — continuing session $(printf '%.8s' "$session_id")"
   else
@@ -121,10 +211,42 @@ do_resume() {
   if [ -n "$session_id" ]; then
     set -- --resume "$session_id" "$@"
   fi
-  ar_log "daemon[$$]: exec $CLAUDE_BIN $* $EXTRA_ARGS (attempt $attempt)"
+  # Stream the resume's output to a live file so the cockpit can show progress
+  # WHILE it runs, not only after (D44). The live file is truncated per attempt;
+  # $out is read back for the tail and the bounce guard.
+  #
+  # DETECTION SAFETY (C1/C5/C6, D45): the bounce guard and ar_parse_reset_time
+  # only match the MEASURED plain-text F1 format. Whether the F1 substrings
+  # survive inside real claude's stream-json is UNVERIFIED, and this feeds a
+  # safety rail we cannot cheaply test — so default to PLAIN output (detection
+  # on the measured format). stream-json (granular live events) is strict opt-in
+  # via AR_CFG_RESUME_STREAM=1, and only when the user has not already set
+  # --output-format in EXTRA_ARGS (avoid passing it twice).
+  local live fmt=""
+  live="$(ar_resume_live_file "$WS")"
+  mkdir -p "$(dirname "$live")" 2>/dev/null
+  : > "$live"
+  if [ "${AR_CFG_RESUME_STREAM:-0}" = "1" ]; then
+    case " $EXTRA_ARGS " in
+      *" --output-format "*) : ;;
+      *) fmt="--output-format stream-json --verbose" ;;
+    esac
+  fi
+  # F05: final revalidation IMMEDIATELY before exec. A reschedule that landed
+  # after the resuming transition above must still preempt the old resume —
+  # otherwise we would spend quota on the schedule the user just replaced.
+  if [ -n "${SERVICE_GEN:-}" ] && [ "$(ar_task_get "$WS" resume_generation)" != "$SERVICE_GEN" ]; then
+    ar_log "daemon[$$]: generation moved just before exec — not invoking claude (F05)"
+    # We had flipped status to resuming; hand it back to waiting so the new
+    # schedule is serviced cleanly on the next loop.
+    ar_task_upsert "$WS" "status=waiting" 2>/dev/null || true
+    return 2
+  fi
+  ar_log "daemon[$$]: exec $CLAUDE_BIN $fmt $* $EXTRA_ARGS (attempt $attempt)"
   # shellcheck disable=SC2086
-  out="$(cd "$WS" 2>/dev/null && "$CLAUDE_BIN" "$@" $EXTRA_ARGS 2>&1)"
+  ( cd "$WS" 2>/dev/null && "$CLAUDE_BIN" $fmt "$@" $EXTRA_ARGS ) >"$live" 2>&1
   rc=$?
+  out="$(cat "$live" 2>/dev/null)"
   RESUME_OUT="$out"
   ar_task_set "$WS" last_output_tail "$(printf '%s' "$out" | tail -c 1500)"
   ar_log "daemon[$$]: attempt $attempt exited $rc"
@@ -188,7 +310,34 @@ while :; do
     # time come from local data — no probe, no quota. We fall through to the
     # probe path only when rate.json is absent or stale.
     RATE_RESUME=""
-    if ar_rate_usable; then
+
+    # F01: once a limit is CONFIRMED (limit_seen=1), the sensor's reset time is
+    # a trusted ABSOLUTE deadline. Become due at it and resume with NO probe —
+    # this is the advertised zero-probe path. It covers both a deadline we
+    # persisted when we first saw the limit (limit_reset_at, already +grace)
+    # AND a static rate.json whose resets_at is already in the past (which
+    # ar_rate_usable rejects, so without this it would force a needless probe).
+    # F4 only supplies the reset TIME here — the limit itself was already
+    # confirmed by F1/sensor, so this never establishes "not limited" (C1/C6).
+    if [ "$LIMIT_SEEN" = "1" ]; then
+      SENSOR_RESET=""
+      DEADLINE="$(ar_task_get "$WS" limit_reset_at)"
+      case "$DEADLINE" in ''|*[!0-9]*) DEADLINE="" ;; esac
+      SNAP_RESET="$(ar_rate_get resets_at)"
+      case "$SNAP_RESET" in ''|*[!0-9]*) SNAP_RESET="" ;; esac
+      if [ -n "$DEADLINE" ]; then
+        SENSOR_RESET="$DEADLINE"
+      elif [ -n "$SNAP_RESET" ]; then
+        SENSOR_RESET=$(( SNAP_RESET + RESET_GRACE ))
+      fi
+      if [ -n "$SENSOR_RESET" ] && [ "$NOW" -ge "$SENSOR_RESET" ]; then
+        ar_journal_append "$WS" "limit-lifted" "trusted sensor reset time reached — resuming without a probe"
+        ar_log "daemon[$$]: sensor reset deadline reached; resuming with no probe (F01)"
+        RATE_RESUME=1
+      fi
+    fi
+
+    if [ -z "$RATE_RESUME" ] && ar_rate_usable; then
       USED="$(ar_rate_get used_percentage)"; USED="${USED%%.*}"
       # Guard against a null/blank/non-numeric reading (e.g. JSON null -> "None"):
       # treat anything not all-digits as 0 so the -ge comparison can't error out.
@@ -207,6 +356,9 @@ while :; do
         RESET_TGT_ISO="$(ar_epoch_to_iso "$RESET_TARGET")"
         if [ "$NOW" -lt "$RESET_TARGET" ]; then
           ar_task_set "$WS" resume_at "$RESET_TGT_ISO"
+          # F01: persist the trusted deadline so the next wake resumes with NO
+          # probe even after rate.json has gone stale (resets_at now in the past).
+          ar_task_set "$WS" limit_reset_at "$RESET_TARGET"
           ar_log "daemon[$$]: sensor limited (${USED}%); reset $RESET_ISO, resuming $RESET_TGT_ISO (+${RESET_GRACE}s)"
           [ -n "${AR_DAEMON_ONESHOT:-}" ] && stand_down "oneshot: sensor limited, waiting for reset"
           continue
@@ -230,7 +382,22 @@ while :; do
     fi
 
     if [ -z "$RATE_RESUME" ]; then
-    if ! do_probe; then
+    do_probe; PROBE_RC=$?
+    if [ "$PROBE_RC" -eq 2 ]; then
+      # F23: the probe ERRORED (missing binary, network, auth) with NO measured
+      # F1 message. C1 forbids reading a bare nonzero exit as a rate limit, so
+      # we do NOT set limit_seen and do NOT authorize any resume — an unrelated
+      # failure must never later masquerade as "limit lifted". Just retry so a
+      # transient error can clear on its own.
+      NOW="$(date +%s)"
+      NEXT_ISO="$(ar_epoch_to_iso $((NOW + PROBE_INTERVAL)) )"
+      ar_task_set "$WS" resume_at "$NEXT_ISO"
+      ar_journal_append "$WS" "probe-error" "probe failed with no limit message (transient/config error) — retrying at $NEXT_ISO; no limit assumed"
+      ar_log "daemon[$$]: probe error, no F1 message (rc=2); retrying at $NEXT_ISO — no limit assumed"
+      [ -n "${AR_DAEMON_ONESHOT:-}" ] && stand_down "oneshot: probe error"
+      continue
+    fi
+    if [ "$PROBE_RC" -eq 1 ]; then
       # Limit is active right now — record that we've seen it, so a later
       # successful probe counts as a real "lifted" and can resume.
       if [ "$LIMIT_SEEN" != "1" ]; then
@@ -297,10 +464,20 @@ while :; do
     fi
   fi
 
-  COUNT="$(ar_task_get "$WS" resume_count)"
-  COUNT="${COUNT:-0}"
-  MAX="$(ar_task_get "$WS" max_resumes)"
-  MAX="${MAX:-3}"
+  COUNT="$(ar_task_get "$WS" resume_count)"; COUNT="${COUNT:-0}"
+  MAX="$(ar_task_get "$WS" max_resumes)"; MAX="${MAX:-3}"
+  # F20 (C5): the cap is a safety rail — garbage must never bypass it. A
+  # non-numeric count/cap would make `[ -ge ]` error (bash treats that as false
+  # and would proceed to resume), so FAIL CLOSED instead: mark failed, resume
+  # nothing, consume no attempt.
+  case "$COUNT$MAX" in
+    *[!0-9]*)
+      ar_task_set "$WS" status failed
+      ar_journal_append "$WS" "failed" "invalid attempt counters (resume_count='$COUNT' max_resumes='$MAX') — failing closed (C5)"
+      ar_notify "Auto-resume failed" "Task in $WS has invalid attempt counters; not resuming."
+      stand_down "invalid numeric state — fail closed"
+      ;;
+  esac
   if [ "$COUNT" -ge "$MAX" ]; then
     ar_task_set "$WS" status failed
     ar_journal_append "$WS" "failed" "max_resumes ($MAX) reached"
@@ -308,7 +485,35 @@ while :; do
     stand_down "max_resumes reached"
   fi
 
+  # F05: snapshot the generation token of the schedule we are about to service.
+  # A reschedule stamps a fresh token in state; we revalidate this snapshot after
+  # the grace window and again immediately before exec (in do_resume), and
+  # abandon this now-stale resume if it changed — so a schedule the user
+  # replaced never spends quota. Empty when task-resume-at.sh has not (yet)
+  # stamped a token: the guards below then no-op, preserving prior behavior.
+  SERVICE_GEN="$(ar_task_get "$WS" resume_generation)"
+
   IMPORTANCE="$(ar_task_get "$WS" importance)"
+
+  # C5 — QUIET HOURS. The limit has lifted and we are ready to resume. If that
+  # moment falls inside the user's configured quiet window, DEFER the resume
+  # until the window closes — the reset already elapsed, so this only pushes the
+  # resume LATER, never earlier. Opt-in and off by default (ar_quiet_window_end
+  # returns nonzero unless both AR_CFG_QUIET_START/END are set). Notify-only
+  # (low importance) never auto-resumes, so it is not deferred.
+  if [ "$IMPORTANCE" != "low" ]; then
+    QNOW="$(date +%s)"
+    if QUIET_END="$(ar_quiet_window_end "$QNOW")"; then
+      QEND_ISO="$(ar_epoch_to_iso "$QUIET_END")"
+      ar_task_upsert "$WS" "status=waiting" "resume_at=$QEND_ISO"
+      ar_journal_append "$WS" "quiet-hours" "limit lifted but inside quiet hours — deferring resume to $QEND_ISO"
+      ar_notify "Auto-resume deferred" "Task in $WS is ready, but it's quiet hours — resuming at $QEND_ISO."
+      ar_log "daemon[$$]: within quiet hours; deferring resume to $QEND_ISO"
+      [ -n "${AR_DAEMON_ONESHOT:-}" ] && stand_down "oneshot: deferred for quiet hours"
+      continue
+    fi
+  fi
+
   case "$IMPORTANCE" in
     low)
       ar_task_set "$WS" status limit-hit
@@ -317,10 +522,25 @@ while :; do
       stand_down "low importance: notified only"
       ;;
     normal)
-      ar_notify "Claude limit reset" "Auto-resuming task in $WS in ${GRACE}s. Stop it with: claude-standby cancel"
+      # The limit has lifted; we hold for a grace window so the user can cancel.
+      # Publish the exact resume moment into resume_at + a journal line (D44) so
+      # the cockpit shows "resumes at HH:MM" during the grace, not a stale time.
+      GRACE_AT="$(ar_epoch_to_iso $(( $(date +%s) + GRACE )) )"
+      ar_task_set "$WS" resume_at "$GRACE_AT"
+      ar_journal_append "$WS" "grace" "limit reset — auto-resuming at $GRACE_AT (${GRACE}s grace; cancel to stop)"
+      ar_notify "Claude limit reset" "Auto-resuming task in $WS at $GRACE_AT. Stop it with: claude-standby cancel"
       sleep "$GRACE"
       STATUS="$(ar_task_get "$WS" status)"
       [ "$STATUS" = "waiting" ] || stand_down "status changed to '$STATUS' during grace window"
+      # F05: a reschedule keeps status=waiting, so the check above cannot see it.
+      # Compare the generation token instead: if it moved during grace, the user
+      # replaced this schedule — abandon this resume and loop to service the new
+      # one (do NOT run the old, now-superseded resume).
+      if [ -n "$SERVICE_GEN" ] && [ "$(ar_task_get "$WS" resume_generation)" != "$SERVICE_GEN" ]; then
+        ar_journal_append "$WS" "rescheduled" "schedule changed during grace — abandoning this resume; servicing the new one"
+        ar_log "daemon[$$]: generation moved during grace — re-servicing new schedule (F05)"
+        continue
+      fi
       ;;
     *)
       ar_notify "Claude limit reset" "Auto-resuming critical task in $WS now."
@@ -328,11 +548,30 @@ while :; do
   esac
 
   ATTEMPT=$((COUNT + 1))
-  if do_resume "$ATTEMPT"; then
-    RESUME_RC=0
-  else
-    RESUME_RC=1
-  fi
+  # C5 progress-stall detection: fingerprint the workspace progress file BEFORE
+  # the resume runs, so afterwards we can tell whether this attempt actually
+  # changed anything (a clean exit that moved nothing is a stall, not "done").
+  PROGRESS_PRE="$(ar_progress_fingerprint "$WS")"
+  do_resume "$ATTEMPT"; DR_RC=$?
+  case "$DR_RC" in
+    0) RESUME_RC=0 ;;
+    2)
+      # F05: do_resume abandoned this resume before invoking claude because the
+      # schedule was rescheduled under us. Do NOT count it as an attempt; loop
+      # to service the new schedule. Status is already back to waiting.
+      ar_journal_append "$WS" "rescheduled" "resume aborted before exec — schedule changed; servicing the new one"
+      continue
+      ;;
+    3)
+      # F24: the safety-critical status=resuming/attempt write failed, so claude
+      # was never invoked (fail closed). Stand down rather than spin: retrying
+      # would keep hitting the same unwritable state and never record progress.
+      ar_journal_append "$WS" "failed" "could not record the resuming transition — refused to resume (fail-closed)" 2>/dev/null || true
+      ar_notify "Auto-resume halted" "Could not safely record state for $WS — not resuming."
+      stand_down "state write failed before resume (fail-closed)"
+      ;;
+    *) RESUME_RC=1 ;;
+  esac
 
   # The user may have cancelled (or rescheduled) while the resume was in
   # flight — never overwrite a status someone else changed under us.
@@ -343,6 +582,35 @@ while :; do
   fi
 
   if [ "$RESUME_RC" -eq 0 ]; then
+    # C5 — PROGRESS-STALL / OUTCOME detection. A resume can exit 0 yet make NO
+    # real progress (permission-blocked, the model just declares done, an empty
+    # continuation). Before reporting the task finished, confirm this attempt
+    # actually CHANGED the workspace progress file. If it did not — across
+    # AR_CFG_STALL_MAX consecutive clean-but-idle resumes — mark it STUCK/failed
+    # instead of silently "done". Only judged when the workspace HAS a progress
+    # file (fingerprint != "none"); a repo without one keeps the prior behavior,
+    # so this never raises a false stall.
+    PROGRESS_POST="$(ar_progress_fingerprint "$WS")"
+    STALL_MAX="$(ar_uint "${AR_CFG_STALL_MAX:-2}" 2 1000)"
+    if [ "$STALL_MAX" -gt 0 ] && [ "$PROGRESS_POST" != "none" ] && [ "$PROGRESS_POST" = "$PROGRESS_PRE" ]; then
+      STALL="$(ar_uint "$(ar_task_get "$WS" stall_count)" 0)"
+      STALL=$((STALL + 1))
+      if [ "$STALL" -ge "$STALL_MAX" ] || [ "$ATTEMPT" -ge "$MAX" ]; then
+        ar_task_upsert "$WS" "status=failed" "stall_count=$STALL"
+        ar_journal_append "$WS" "stuck" "resume finished cleanly but made no progress ${STALL}x in a row — marking stuck, not done"
+        ar_notify "Auto-resume stuck" "Task in $WS keeps finishing without changing $(ar_task_get "$WS" progress_file). Not marking done — check it: claude-standby status"
+        stand_down "progress stalled ($STALL consecutive no-progress resumes)"
+      fi
+      # Under the stall cap with attempts remaining: retry rather than claim done.
+      NOW="$(date +%s)"
+      NEXT_ISO="$(ar_epoch_to_iso $(( NOW + BACKOFF_BASE )) )"
+      ar_task_upsert "$WS" "status=waiting" "resume_at=$NEXT_ISO" "stall_count=$STALL"
+      ar_journal_append "$WS" "stall" "clean resume made no progress (${STALL}/${STALL_MAX}) — retrying at $NEXT_ISO"
+      ar_log "daemon[$$]: clean resume, no progress (${STALL}/${STALL_MAX}); retrying at $NEXT_ISO"
+      [ -n "${AR_DAEMON_ONESHOT:-}" ] && stand_down "oneshot: no-progress retry scheduled"
+      continue
+    fi
+    # Progress was made (or no progress file to judge by) — genuinely done.
     ar_task_set "$WS" status done
     ar_journal_append "$WS" "done" "resume attempt $ATTEMPT finished cleanly"
     ar_notify "Task finished" "Resumed task in $WS completed."

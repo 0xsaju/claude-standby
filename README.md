@@ -9,8 +9,8 @@ session with context, and never makes you babysit a terminal again.
 
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey)
-![Version](https://img.shields.io/badge/version-0.9.3-informational)
-![Tests](https://img.shields.io/badge/tests-273%20passing-brightgreen)
+![Version](https://img.shields.io/badge/version-0.9.4-informational)
+![Tests](https://img.shields.io/badge/tests-286%20passing-brightgreen)
 ![Status](https://img.shields.io/badge/status-alpha-orange)
 [![VS Marketplace](https://img.shields.io/badge/VS_Marketplace-Install-0066b8?logo=visualstudiocode&logoColor=white)](https://marketplace.visualstudio.com/items?itemName=0xsaju.claude-standby-cockpit)
 [![Open VSX](https://img.shields.io/badge/Open_VSX-Install-a60ee5)](https://open-vsx.org/extension/0xsaju/claude-standby-cockpit)
@@ -143,6 +143,7 @@ Tip: `alias cs='claude-standby'`.
 | `sessions [--workspace <path>]` | List a workspace's Claude Code sessions — pick which one resumes. |
 | `start <tier> <description>` | Track this workspace (`critical` \| `normal` \| `low`). |
 | `status` | Task state, tier, attempts, resume time, journal. *(default)* |
+| `output [--workspace <path>]` | Show a resume's live/last output (resumes run headless — this is how you watch one). |
 | `list` | All tracked workspaces. |
 | `cancel` | Stop now: daemon and any in-flight resume are killed. |
 | `log [n]` / `watch` | Show / follow the log. |
@@ -155,8 +156,12 @@ Full reference with examples: **[User Guide](docs/USER-GUIDE.md)**.
 ## How it works
 
 One small engine behind `state.json`, fed by data Claude Code already
-produces. Nothing polls a server, nothing guesses — the whole flow, from
-the limit to the resumed conversation:
+produces. We run no server of our own and the daemon's own loop is nothing
+but local file reads and a wall-clock check — no custom polling service, no
+scraping. Two things do reach the network by design: the probe fallback
+runs a real (tiny) `claude` call, which talks to Anthropic like any other
+Claude Code invocation, and the VS Code cockpit checks GitHub for extension
+updates. The rest of the flow, from the limit to the resumed conversation:
 
 ```mermaid
 sequenceDiagram
@@ -178,8 +183,12 @@ sequenceDiagram
 1. **Schedule** — `resume-at` pins the session to continue, records the task
    in `~/.claude/auto-resume/state.json`, and spawns a small detached daemon.
 2. **Wait** — the daemon wakes every 60 seconds, re-reads state (so cancel
-   and reschedule always take effect within a tick), and compares wall-clock
+   and reschedule always take effect within a tick, and are also
+   re-checked immediately before a resume fires) and compares wall-clock
    time. Each tick is a few local file reads: zero tokens, zero network.
+   The one exception: once a resume is actually running, only `cancel`
+   stops it — a reschedule issued while it's in flight takes effect after
+   that attempt finishes, not mid-attempt.
 3. **Detect the reset** — auto mode reads your live reset time from Claude
    Code's own usage data (streamed to the status line — a source we
    *measured*, F4) and schedules for that exact moment, no probe, no quota.
@@ -226,11 +235,14 @@ is still unverified — see Contributing if you can help confirm it.
 | Probe fallback with measured limit-message parsing | ✅ |
 | Scheduled resume at a known time | ✅ |
 | Resume daemon: tiers, backoff, caps, reset safety grace, instant cancel | ✅ |
+| Default permission allowlist on unattended resumes · quiet hours (opt-in) | ✅ |
+| Progress-stall / clean-but-idle outcome detection (marks `stuck`, not `done`) | ✅ |
 | Task tracking, journal, multi-workspace `list` | ✅ |
 | One-command install | ✅ |
 | Full CLI tool surface (update/uninstall/doctor/…) | ✅ |
 | VS Code / Cursor cockpit | ✅ published (VS Marketplace + Open VSX) |
-| `/warmup` window scheduler · stuck detection · resume verification | 🕐 Planned |
+| `start` self-scheduling a resume the moment a limit hits (today it only tracks the task; `resume-at` still does the scheduling) | 🕐 Planned |
+| `/warmup` window scheduler | 🕐 Planned |
 | Native Windows (Task Scheduler) · reboot-surviving schedules | 🕐 Planned |
 
 ## Development

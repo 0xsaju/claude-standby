@@ -27,12 +27,82 @@ REPO_URL="${CAR_REPO_URL:-https://github.com/0xsaju/claude-standby.git}"
 # only reliable install/update counter (branch/tag archives are uncounted).
 # The asset filename stays constant across releases so this URL never changes.
 TARBALL_URL="${CAR_TARBALL_URL:-https://github.com/0xsaju/claude-standby/releases/latest/download/claude-standby.tar.gz}"
-INSTALL_DIR="${CAR_INSTALL_DIR:-$HOME/.claude-standby}"
-BIN_DIR="${CAR_BIN_DIR:-$HOME/.local/bin}"
-LINK="$BIN_DIR/claude-standby"
-
 say() { printf '%s\n' "$*"; }
 die() { printf 'install: %s\n' "$*" >&2; exit 1; }
+
+# Resolve a path (which may not exist yet) to an absolute, symlink-free form
+# so overrides like CAR_INSTALL_DIR can be checked against real broad
+# directories rather than a relative/symlinked alias of one (F12). Portable:
+# prefers python3's realpath, else walks up to the nearest existing ancestor
+# with plain cd/pwd -P and reattaches the missing tail — no GNU-only
+# `realpath`/`readlink -f` required (C2).
+canon_path() {
+  case "$1" in
+    /*) set -- "$1" ;;
+    *) set -- "$PWD/$1" ;;
+  esac
+  if command -v python3 >/dev/null 2>&1; then
+    RESOLVED="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$1" 2>/dev/null)"
+    if [ -n "$RESOLVED" ]; then
+      printf '%s\n' "$RESOLVED"
+      return 0
+    fi
+  fi
+  P="$1"; SUFFIX=""
+  while [ ! -d "$P" ] && [ "$P" != "/" ]; do
+    SUFFIX="/$(basename "$P")$SUFFIX"
+    P="$(dirname "$P")"
+  done
+  if [ -d "$P" ]; then
+    P="$(cd "$P" && pwd -P)"
+  fi
+  printf '%s%s\n' "$P" "$SUFFIX"
+}
+
+# Reject a canonicalized path that is empty, "/", $HOME itself, or another
+# unmistakably-broad directory — a mistaken CAR_INSTALL_DIR must not be able
+# to make `rm -rf` erase a home or system directory (F12).
+reject_broad_path() {
+  P="$1"; LABEL="$2"
+  case "$P" in
+    ""|"/") die "$LABEL resolves to '$P' — refusing to operate on it" ;;
+  esac
+  HOME_CANON="$(canon_path "$HOME")"
+  case "$P" in
+    "$HOME_CANON")
+      die "$LABEL resolves to your home directory ($P) — refusing to operate on it" ;;
+  esac
+  case "$P" in
+    "/root"|"/home"|"/Users"|"/usr"|"/usr/local"|"/etc"|"/var"|"/bin"|"/sbin"|"/opt"|"/System"|"/Library"|"$PWD")
+      die "$LABEL resolves to a broad path ($P) — refusing to operate on it" ;;
+  esac
+}
+
+INSTALL_DIR="$(canon_path "${CAR_INSTALL_DIR:-$HOME/.claude-standby}")"
+BIN_DIR="$(canon_path "${CAR_BIN_DIR:-$HOME/.local/bin}")"
+LINK="$BIN_DIR/claude-standby"
+reject_broad_path "$INSTALL_DIR" "CAR_INSTALL_DIR"
+reject_broad_path "$BIN_DIR" "CAR_BIN_DIR"
+
+# Marker that stamps a directory as "ours" so a stray CAR_INSTALL_DIR
+# pointed at some unrelated non-empty directory can't be wiped and replaced
+# (F12). Written into staging before the atomic move, so a freshly-placed
+# install always carries it; already-installed trees from before this
+# sentinel existed are still recognized by their known file layout.
+INSTALL_SENTINEL="$INSTALL_DIR/.claude-standby-install"
+looks_like_our_install() {
+  [ -f "$INSTALL_DIR/bin/claude-standby" ] && [ -f "$INSTALL_DIR/VERSION" ] \
+    && [ -f "$INSTALL_DIR/plugin/scripts/lib.sh" ]
+}
+require_known_install_dir() {
+  [ -e "$INSTALL_DIR" ] || return 0
+  if [ -d "$INSTALL_DIR" ] && [ -z "$(find "$INSTALL_DIR" -mindepth 1 -maxdepth 1 2>/dev/null)" ]; then
+    return 0
+  fi
+  [ -e "$INSTALL_SENTINEL" ] && return 0
+  looks_like_our_install && return 0
+  die "$INSTALL_DIR exists and doesn't look like a claude-standby install — refusing to touch it. Point CAR_INSTALL_DIR at an empty or unused path."
+}
 
 # The old plugin packaging (removed 2026-07-19, D33) lives in Claude Code's
 # own plugin store — deleting our files can't remove it. True only for
@@ -79,13 +149,26 @@ fetch_tree() {
 }
 
 # Download → validate → swap. Never leaves a half-updated install: the new
-# copy must pass a sanity check in staging before the old one is removed.
+# copy must pass a sanity check in staging before the old one is touched,
+# and the swap itself renames the old tree aside as a backup rather than
+# deleting it, so an interruption or a failed move rolls back cleanly
+# instead of leaving a gap (F26).
 install_tree() {
+  require_known_install_dir
   STAGE="$(mktemp -d "$INSTALL_DIR.new-XXXXXX")" || die "cannot create a staging directory next to $INSTALL_DIR"
+  BACKUP="$INSTALL_DIR.bak-$$"
+  # Clean up staging (and an in-flight backup) on interrupt as well as on
+  # early failure — not just the happy path.
+  trap 'rm -rf "$STAGE" "$BACKUP" 2>/dev/null' EXIT INT TERM HUP
+
   if ! fetch_tree "$STAGE"; then
     rm -rf "$STAGE"
     die "download failed — check your network, or grab it from https://github.com/0xsaju/claude-standby"
   fi
+  # Installs are ALWAYS plain trees (D36) — strip any .git a tarball happened to
+  # carry, so the installed copy is never misread as a development git checkout
+  # (which uninstall/update rightly refuse to touch).
+  rm -rf "$STAGE/.git"
   # Assert the key files exist and are non-empty, so a truncated-but-parseable
   # download can't replace a working install with an incomplete tree.
   for req in bin/claude-standby VERSION plugin/scripts/lib.sh \
@@ -95,17 +178,94 @@ install_tree() {
       die "downloaded copy is incomplete ($req missing) — install left untouched"
     fi
   done
-  if ! bash -n "$STAGE/plugin/scripts/lib.sh" 2>/dev/null; then
-    rm -rf "$STAGE"
-    die "downloaded copy failed a sanity check — install left untouched"
+  # Sanity-check every shell entry point (not just lib.sh) and, where node
+  # is available, every JS entry point, so a broken download can't replace
+  # a working install (F26).
+  for sh in "$STAGE"/bin/claude-standby "$STAGE"/plugin/scripts"/"*.sh; do
+    [ -f "$sh" ] || continue
+    if ! bash -n "$sh" 2>/dev/null; then
+      rm -rf "$STAGE"
+      die "downloaded copy failed a sanity check ($sh) — install left untouched"
+    fi
+  done
+  if command -v node >/dev/null 2>&1; then
+    for js in "$STAGE"/vscode-extension"/"*.js; do
+      [ -f "$js" ] || continue
+      if ! node --check "$js" 2>/dev/null; then
+        rm -rf "$STAGE"
+        die "downloaded copy failed a sanity check ($js) — install left untouched"
+      fi
+    done
   fi
   chmod +x "$STAGE"/bin/claude-standby "$STAGE"/plugin/scripts/*.sh "$STAGE"/test/*.sh 2>/dev/null || true
-  rm -rf "$INSTALL_DIR"
-  mv "$STAGE" "$INSTALL_DIR"
+  # Sentinel (F12): stamp every install we place so a later update/uninstall
+  # can tell this directory is genuinely ours.
+  : > "$STAGE/.claude-standby-install" 2>/dev/null || true
+
+  if [ -e "$INSTALL_DIR" ]; then
+    rm -rf "$BACKUP" 2>/dev/null
+    if ! mv "$INSTALL_DIR" "$BACKUP"; then
+      rm -rf "$STAGE"
+      die "could not move the existing install aside — install left untouched"
+    fi
+  fi
+  if ! mv "$STAGE" "$INSTALL_DIR"; then
+    # Roll back: put the previous install back so we never leave a gap.
+    rm -rf "$INSTALL_DIR" 2>/dev/null
+    [ -e "$BACKUP" ] && mv "$BACKUP" "$INSTALL_DIR"
+    rm -rf "$STAGE" 2>/dev/null
+    die "could not place the new install — rolled back to the previous version"
+  fi
+  rm -rf "$BACKUP" 2>/dev/null
+  trap - EXIT INT TERM HUP
 }
 
 car_installed_version() {
   head -1 "$INSTALL_DIR/VERSION" 2>/dev/null | tr -d '[:space:]'
+}
+
+# Stop every ownership-plausible daemon under $1/daemons/*.pid before the
+# caller removes files out from under it (F18). Ownership check: the pid
+# must be a live process whose command line actually mentions daemon.sh —
+# never signal a PID that was merely reused for something unrelated.
+stop_workspace_daemons() {
+  DIR="$1/daemons"
+  [ -d "$DIR" ] || return 0
+  STOPPED=0; FAILED=0
+  for p in "$DIR"/*.pid; do
+    [ -e "$p" ] || break
+    pid="$(cat "$p" 2>/dev/null | tr -dc '0-9')"
+    if [ -z "$pid" ] || [ "$pid" -le 1 ] 2>/dev/null; then
+      rm -f "$p"
+      continue
+    fi
+    if kill -0 "$pid" 2>/dev/null; then
+      cmd="$(ps -p "$pid" -o command= 2>/dev/null || ps -p "$pid" -o args= 2>/dev/null)"
+      case "$cmd" in
+        *daemon.sh*)
+          kill "$pid" 2>/dev/null
+          tries=0
+          while kill -0 "$pid" 2>/dev/null && [ "$tries" -lt 5 ]; do
+            sleep 1
+            tries=$((tries + 1))
+          done
+          if kill -0 "$pid" 2>/dev/null; then
+            kill -9 "$pid" 2>/dev/null
+            sleep 1
+          fi
+          if kill -0 "$pid" 2>/dev/null; then
+            say "warning: could not stop daemon pid $pid ($(basename "$p" .pid))"
+            FAILED=$((FAILED + 1))
+          else
+            STOPPED=$((STOPPED + 1))
+          fi
+          ;;
+      esac
+    fi
+    rm -f "$p"
+  done
+  [ "$STOPPED" -gt 0 ] && say "Stopped $STOPPED daemon(s)."
+  [ "$FAILED" -eq 0 ]
 }
 
 # --- status-line sensor offer (D41/D42) -------------------------------------
@@ -142,18 +302,33 @@ offer_sensor() {
   say "  line you have keeps working (chained), and it's removable any"
   say "  time with: claude-standby remove-statusline"
   printf '  Enable it? [Y/n] '
-  IFS= read -r SENSOR_REPLY < /dev/tty || SENSOR_REPLY=""
-  mark_offered
-  case "$SENSOR_REPLY" in
-    [Nn]*) ;;
-    *) bash "$INSTALL_DIR/plugin/scripts/setup-statusline.sh" install || true ;;
-  esac
+  # Only honor the [Y]-on-Enter default when the read ACTUALLY succeeds (a human
+  # typed a line). `[ -r /dev/tty ]` can pass in non-interactive environments
+  # (CI/containers) where the read then hits EOF — treating that empty reply as
+  # "yes" would edit Claude Code's settings.json without consent. So: read
+  # failure / no tty -> skip silently, never install.
+  if IFS= read -r SENSOR_REPLY < /dev/tty 2>/dev/null; then
+    mark_offered
+    case "$SENSOR_REPLY" in
+      [Nn]*) ;;
+      *) bash "$INSTALL_DIR/plugin/scripts/setup-statusline.sh" install || true ;;
+    esac
+  fi
 }
 
 if [ "${1:-}" = "--uninstall" ]; then
-  if [ -f "$INSTALL_DIR/plugin/scripts/setup-statusline.sh" ]; then
-    bash "$INSTALL_DIR/plugin/scripts/setup-statusline.sh" remove 2>/dev/null | grep -v "nothing to remove" || true
+  if ! stop_workspace_daemons "$AR_DATA"; then
+    die "a daemon is still running — retry once it stops, or kill it manually before uninstalling"
   fi
+  if [ -f "$INSTALL_DIR/plugin/scripts/setup-statusline.sh" ]; then
+    SENSOR_OUT="$(bash "$INSTALL_DIR/plugin/scripts/setup-statusline.sh" remove 2>&1)"
+    SENSOR_RC=$?
+    printf '%s\n' "$SENSOR_OUT" | grep -v "nothing to remove" || true
+    if [ "$SENSOR_RC" -ne 0 ]; then
+      die "could not remove the status-line sensor — aborting uninstall so settings.json isn't left referencing a deleted script"
+    fi
+  fi
+  require_known_install_dir
   rm -f "$LINK"
   rm -rf "$INSTALL_DIR"
   say "Removed $INSTALL_DIR and $LINK."
@@ -201,6 +376,12 @@ fi
 install_tree
 
 mkdir -p "$BIN_DIR"
+# Link-target care (F12): never clobber something at $LINK that isn't
+# already our own symlink — an unrelated real file there is a sign
+# CAR_BIN_DIR points somewhere it shouldn't.
+if [ -e "$LINK" ] && [ ! -L "$LINK" ]; then
+  die "$LINK already exists and is not a symlink — refusing to overwrite it. Remove it manually or point CAR_BIN_DIR elsewhere."
+fi
 ln -sf "$INSTALL_DIR/bin/claude-standby" "$LINK"
 VER="$(car_installed_version)"
 

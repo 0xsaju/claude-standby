@@ -844,3 +844,211 @@ resets. +1 regression test (reschedule after a pre-exhausted cap yields
 **Live-state note.** Existing scheduled tasks written by <=0.9.2 still
 carry the stale count; cancelling and rescheduling under >=0.9.3 clears
 it, or the count can be repaired in state.json directly.
+
+## D44 — 2026-07-23 — Auto-resume made visible: live output, click-to-open, grace timing, header alerts
+
+**Problem (field reports).** A resume ran headless and detached — the daemon
+captured its output at the end and the user's interactive window showed
+nothing, so a working resume read as "it did nothing" and the user manually
+re-resumed the same session (a double-run). Separately: mid-typing in the
+composer, the 5s auto-refresh rebuilt the whole webview and wiped the
+in-progress prompt/session/time back to defaults (rate.json changes
+constantly, forcing a re-render); the normal-tier grace window showed a stale
+resume time; and misconfig/updates had no prominent signal.
+
+**Verified first (Q6).** A headless `claude --resume <id> -p "…"` appends to
+the SAME session and is visible on reopening it (measured via a manual run,
+HOOK-FINDINGS Q6). So the pinned `session_id` already points at the resumed
+conversation — no schema change needed to "open" it.
+
+**Decisions.**
+- **Live output.** `do_resume` streams the resume to a per-workspace live file
+  (`ar_resume_live_file`, keyed by the `[^A-Za-z0-9]→-` workspace encoding so
+  the cockpit derives the path in JS) using `--output-format stream-json
+  --verbose`, gated by `AR_CFG_RESUME_STREAM` (default 1; 0 = plain output).
+  `$out` is read back from the file for the tail and the bounce guard (the
+  limit substring matches inside JSON too). New `claude-standby output`
+  command prints it; the cockpit shows a live-updating panel.
+- **Click-to-open.** Cockpit "▶ Open in Claude Code" opens `claude --resume
+  <session_id>` in an integrated terminal; `status` prints the same hint.
+- **Grace timing.** The normal-tier grace now publishes `resume_at = now +
+  grace` and a `grace` journal event, so the cockpit countdown shows the real
+  resume moment instead of a passed time.
+- **Header alerts.** A prominent red/amber pill surfaces CLI-missing, broken
+  state, interrupted resume, update-available, or sensor-off.
+- **No-clobber editing.** The webview reports composer focus in/out; the
+  auto-refresh is suppressed while a composer is focused, so typing is never
+  reset (a forced ⟳ still refreshes).
+
+No state.json schema change (the live file and output are host-local; open
+reuses the existing `session_id`). Engine and extension both 0.9.4 (versions now aligned, moving in lockstep). +8 engine
+tests (live file written, `output` command, stream-off fallback, grace
+journaled) → 281 green; cockpit render logic covered by an out-of-tree smoke
+test (stream-json parsing both shapes, alerts, open button).
+
+**Still open (C6-style).** Whether `--output-format stream-json` flushes
+incrementally at a REAL resume is unverified — if it buffers, the live panel
+lags on long tasks (the off-switch falls back to plain output).
+
+## D45 — 2026-07-24 — Pre-publish audit of v0.9.4; stream-json resume default flipped OFF
+
+**What.** Ran a multi-agent pre-publish audit of the D44 changeset (8 finders →
+19 findings). The verification/synthesis phase hit the session limit, so
+findings were verified by direct code inspection and resolved. Full report:
+`docs/audit-0.9.4.md`; raw findings preserved in the workflow journal.
+
+**Key decision — detection safety (C1/C5/C6).** D44 defaulted resumes to
+`--output-format stream-json`, which put the daemon's limit DETECTION (bounce
+guard + `ar_parse_reset_time` — a C5 safety rail) on an UNMEASURED format,
+untestable without real quota. That is exactly what C1 forbids. Resolved by
+defaulting `AR_CFG_RESUME_STREAM` **OFF** (plain output → detection on the
+measured F1 format); stream-json becomes strict opt-in for the granular live
+panel, and only added when the user hasn't already set `--output-format` in
+EXTRA_ARGS. The cockpit live panel still works on plain output. To make
+stream-json safe-by-default later, MEASURE real claude's stream-json limit
+output and add it to HOOK-FINDINGS (then C1 is satisfied).
+
+**Also fixed** (see the report): a webview-breaking `renderLive` throw on a
+bare `null` line; a non-interactive installer path that enabled the sensor +
+edited settings.json without consent; a live-panel freeze past 8000 bytes
+(stateSig length-pinning); `output --workspace` path canonicalization + glued
+form; an unvalidated `session_id` in the cockpit's terminal command; a stuck
+`_editing` refresh guard on panel dispose; duplicate `--output-format`;
+README/CHANGELOG/USER-GUIDE/config reconciled to the plain-default; and the
+first real cockpit-JS coverage in the suite (`test/cockpit-smoke.js` + a
+node-guarded `node --check`). 286 tests green (was 281). Three low/info items
+accepted with rationale (non-ASCII path divergence, single-global editing flag,
+live-file retention). No state.json schema change. VERSION stays 0.9.4.
+
+## D46 — 2026-07-24 — Audit remediation: the 36-finding independent review
+
+**What.** An independent audit (`docs/independent-audit-2026-07-24.md`, 8
+Sonnet verifiers + Opus synthesis triage in
+`docs/audit-triage-2026-07-24.md`) reviewed the whole tree beyond the D45
+pre-publish pass and reported 36 findings (F01–F36). All 36 were verified
+against live code — 32 CONFIRMED, 4 PARTIAL, 0 refuted. Verdict:
+FIX-THEN-SHIP. A coordinated multi-phase pass (engine, cockpit, tests,
+docs — this entry closes the docs phase) resolved the tree against that
+report. Full per-finding evidence and remediation stay in the two audit
+docs; this entry is the changelog-style summary the project convention
+(D-log) requires.
+
+**Resolved by class:**
+
+- **Session/schedule identity (F03, F04, F32).** Session resolution is now
+  fail-closed: fixed-string exact/prefix matching (not a loose regex),
+  a strict UUID shape, cross-checked transcript `cwd`, and an error (not a
+  silent "pick newest") on ambiguity. `start` now resets a task's prior
+  session/cycle fields instead of merging onto them, so a new task can never
+  inherit an old task's pinned conversation. The divergent session-id
+  regexes across the shell engine and the cockpit were consolidated.
+- **Timing/arithmetic (F02, F25).** Clock parsing forces base-10
+  (`$((10#$h))`) so leading-zero hours/minutes (`08:30`) are never read as
+  octal; all daemon timing/threshold env vars (`TICK`, `GRACE`,
+  `BACKOFF_BASE`, `PROBE_INTERVAL`, `AUTO_GIVEUP`, `ARMED_MAX`, `LIMIT_PCT`,
+  `max_resumes`) are now parsed through one bounded-integer validator that
+  fails closed on blank/negative/fractional/non-numeric input, closing the
+  `max_resumes` cap bypass (F20) along the way.
+- **Detection safety (C1, F23, F27).** A probe's nonzero exit is no longer
+  treated as "limited" — only the exact measured F1 message sets
+  `limit_seen`; unrelated failures (missing binary, network/auth) are
+  classified separately and never authorize a resume. CLAUDE.md's C1 wording
+  now says explicitly that anything outside F1/F2/F4 is informational/opt-in
+  only.
+- **Concurrency/state integrity (F15, F16, F24).** Reads-modify-writes to
+  `state.json` are now serialized under an atomic lock directory
+  (`mkdir`-based, stale-lock reclaim), closing the lost-update race. The
+  daemon pidfile uses the same atomic-lock pattern instead of
+  check-then-write, closing the two-daemons-per-workspace TOCTOU and the
+  wrong-owner pidfile deletion. Safety-critical state transitions
+  (`status=resuming` + attempt increment) are mandatory before `claude` is
+  ever invoked — a failed write aborts the resume instead of running it
+  unrecorded (fail-closed, F24).
+- **Reschedule preemption (F05).** A reschedule now bumps a
+  `resume_generation` token (new v3 field, see the schema-bump entry
+  below); the daemon re-checks it before, during grace, and immediately
+  before exec, so a reschedule issued during the old grace window can no
+  longer let a stale schedule run to completion and burn an unintended
+  resume. (Once a resume is actually running, only `cancel` interrupts
+  it — documented, not treated as a bug.)
+- **C4 sensor safety (F28).** The status-line sensor no longer sources
+  user config as executable shell; sensor registration/removal now compares
+  the exact normalized installed command instead of a path substring (so it
+  can't misidentify and clobber/delete an unrelated status line), and
+  backup failure now aborts the settings edit instead of being silently
+  ignored.
+- **C5 safety rails (F29).** A conservative default permission allowlist
+  now applies to every unattended resume unless the user supplies their own
+  `EXTRA_ARGS` (never `--dangerously-skip-permissions` by default); optional
+  quiet hours defer (never advance) a resume; and progress-stall / outcome
+  detection compares a workspace's progress-file fingerprint across clean
+  resumes, marking the task `stuck` instead of silently `done` after
+  `AR_CFG_STALL_MAX` no-progress resumes. CLAUDE.md's C5 line and README's
+  capability table are updated to match — these are no longer "planned".
+- **Cockpit security (F10, F11).** Webview state interpolation is now
+  escaped, the About/author URL is scheme-validated (http/https only), and
+  inline script execution is tightened; `cliPath`/`CLAUDE_STANDBY_CLAUDE_BIN`
+  are validated and quoted before reaching a terminal, closing the
+  hostile-`.vscode/settings.json` command-injection path.
+- **Process/PID safety (F09, F14, F17).** `cancel` validates the pidfile PID
+  (rejects non-positive/broadcast values) before signaling; immediate
+  cancel falls back to a process-group kill when `pgrep` is unavailable;
+  the live-output/bounce-guard file key uses a collision-resistant digest
+  instead of a lossy path encoding.
+- **Uninstall/updater (F18, F26).** `uninstall` now enumerates and stops
+  every daemon under `daemons/*.pid` before removing the install, and
+  aborts (rather than swallowing the exit code) if the status-line sensor
+  can't be cleanly removed. The installer's validated-update path is closer
+  to atomic with a cleanup trap on interruption.
+- **Housekeeping (F01, F06, F08, F12, F13, F19, F21).** The zero-probe
+  `RESET_TARGET` comparison was fixed so the no-probe path is actually
+  reachable; the cockpit composer injects a pinned session outside the
+  visible window and surfaces invalid-time errors instead of silently
+  falling back to `auto`; `watch` creates the runtime dir before touching
+  the log file; destructive installer `rm -rf` now requires an install
+  sentinel; runtime files/dirs are created private (owner-only) with cache
+  ownership validated before trust; the journal is capped and the live
+  output file is truncated per attempt so `state.json` and the live panel
+  can't grow unbounded (`plugin.log` itself still has no rotation — open
+  follow-up); the text-JSON engine's control-character/`\n` escaping was
+  aligned across engines.
+- **Schema (F22, v2 → v3).** `doctor` now validates JSON parse success, the
+  top-level `version`/`tasks` types, and rejects an unsupported/future
+  schema version as broken instead of reporting `state ok`. Two genuinely
+  new fields — `resume_generation` (F05) and `stall_count` (F29) — required
+  an actual version bump (not the additive-default-`''` precedent of
+  D27/D28, which only covers fields whose absence is a safe default): a v2
+  reader that doesn't know `resume_generation` exists would treat every
+  reschedule as unchanged and defeat F05, so `AR_SCHEMA_VERSION` moved to
+  `3`. See `docs/ARCHITECTURE.md`'s schema section for the full v3 field
+  list.
+- **Layering (F30).** Confirmed by-design: the cockpit's "Open session"
+  directly invoking `claude --resume` is the intentional D44 feature
+  (interactive, id-validated), not a hidden bypass of the CLI-only
+  interface. The only real defect was a stale header comment claiming the
+  cockpit never invokes Claude directly.
+- **Dead/stale artifacts (F31).** The `commands` array in `state.json` is
+  now explicitly documented as reserved-but-unimplemented rather than
+  described as a working UI→daemon channel; `vscode-extension/CHANGELOG.md`
+  notes that the checked-in `.vsix` predates this remediation batch and
+  must be rebuilt before the next publish.
+- **Documentation drift (F35, this phase).** README/USER-GUIDE/CLAUDE.md
+  reconciled to current behavior: reschedule timing now describes the
+  generation-check and the in-flight-resume exception instead of a blanket
+  "always within a minute"; "nothing polls a server" is qualified (the
+  probe fallback calls Anthropic, the cockpit checks GitHub for updates);
+  the capability table moves default-allowlist/quiet-hours/stall-detection
+  out of "Planned"; uninstall docs now describe that it stops daemons first
+  and can refuse rather than leave one orphaned.
+- **Accepted as-is.** F07 (DST skew, self-corrects via the bounce guard),
+  and F36 (no raw provenance artifacts for HOOK-FINDINGS, a deliberate
+  privacy tradeoff — provenance note added to that file) were left
+  unchanged with rationale recorded in the audit triage. F33 (unpinned
+  `npx` + job-wide secrets in the publish workflow) is real but scoped to
+  the not-yet-triggered release pipeline, not the shipped alpha runtime —
+  tracked as a pre-first-real-publish blocker, not an alpha blocker.
+
+**Not required.** No change to `C2`/`C3` (portability, CLI-only interface)
+or `C6` (fake-claude-only iterative testing) — the audit found no violation
+of either. VERSION stays `0.9.4` pending a deliberate release decision; the
+schema is `3` as of this remediation.

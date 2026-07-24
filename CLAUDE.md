@@ -8,12 +8,18 @@ path was removed 2026-07-19 (D31): detection reads local data, not hooks.
 
 ## Hard constraints — do not violate
 
-- **C1 — No invented data shapes.** Detection logic may only match formats
+- **C1 — No invented data shapes.** Positive detection — the decision that a
+  limit is active, or that it has lifted — may only rely on formats
   MEASURED and documented in `docs/HOOK-FINDINGS.md`: F1 (the limit
   MESSAGE the probe reads), F2 (the session store for `--resume` ids), F4
   (the status-line rate stream: `used_percentage` + `resets_at`). No
   guessed payloads. Auto-detect = read a rate snapshot (F4) if present,
   else one `haiku` probe that trusts the F1 message — never the exit code.
+  Anything outside F1/F2/F4 (an alternate cache field such as `rate_pct`,
+  opt-in stream-json output, a loosely-shaped session id) is
+  informational/opt-in only: it may be displayed or tried, but it never by
+  itself authorizes a resume, and the F1 bounce guard still re-checks the
+  real outcome before a resume counts as successful.
 - **C2 — Portable bash.** POSIX-compatible bash, no hard `jq` dependency
   (fallback chain: jq → python3 → awk/sed on canonical layout), no GNU-only
   flags without a BSD alternative. Target Linux + macOS; Windows best-effort.
@@ -27,9 +33,14 @@ path was removed 2026-07-19 (D31): detection reads local data, not hooks.
   (`statusline.sh`) always `exit 0`, finishes fast, chains (never clobbers)
   any existing status line, never stderr noise. It must be invisible when it
   fails.
-- **C5 — Safety rails.** `max_resumes` enforced; stuck detection; permission
-  allowlist by default (`--dangerously-skip-permissions` only behind
-  explicit opt-in); optional quiet hours.
+- **C5 — Safety rails.** `max_resumes` enforced (numeric-validated, fails
+  closed on garbage); a conservative default permission allowlist on every
+  unattended resume unless the user supplies their own `EXTRA_ARGS`
+  (`--dangerously-skip-permissions` only behind explicit opt-in, never
+  added by default); optional quiet hours (off by default, deferral only —
+  never resumes early); progress-stall / clean-but-idle outcome detection
+  marks a task `stuck` instead of silently `done` when a workspace has a
+  progress file to compare against.
 - **C6 — Real quota is precious.** All iterative testing uses
   `test/fake-claude.sh`. Real limit burns only for milestone verification.
 

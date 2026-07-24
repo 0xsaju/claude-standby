@@ -56,4 +56,23 @@ if [ -n "$JOURNAL" ]; then
 else
   echo "  (empty)"
 fi
+
+# Resumes run HEADLESS in the background — they continue the pinned session in
+# place (append-in-place, HOOK-FINDINGS Q6) and never reopen your interactive
+# window. Point the user at where to actually SEE the resume, whichever way
+# this cycle ended (D44).
+case "$STATUS" in
+  resuming|done|failed)
+    if [ -n "$SESSION_ID" ]; then
+      echo ""
+      case "$STATUS" in
+        resuming) echo "Resuming now (headless, in the background). Follow it live with:"
+                  echo "  claude-standby output" ;;
+        done)     echo "Resumed and finished. Open the conversation to see what it did:" ;;
+        failed)   echo "Resume failed. Open the session to see how far it got:" ;;
+      esac
+      [ "$STATUS" != "resuming" ] && echo "  cd \"$WS\" && claude --resume $SESSION_ID"
+    fi
+    ;;
+esac
 exit 0

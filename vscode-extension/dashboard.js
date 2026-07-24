@@ -1,13 +1,16 @@
 // Dashboard webview for Claude Standby Cockpit.
 // Pure presentation: receives a state snapshot from extension.js, renders
-// the page, and posts user intents back — all writes still go through the
-// CLI. Visual direction: the Claude-design "Auto-Resume.dc.html" — an
+// the page, and posts user intents back. Every scheduling/cancel write goes
+// through the CLI; the one deliberate exception is "Open in Claude Code"
+// (openSession, D44), an id-validated interactive launch that has no CLI
+// equivalent. Visual direction: the Claude-design "Auto-Resume.dc.html" — an
 // onboarding/setup screen (A) that gates a professional-tool dashboard (B);
 // the status bar + tooltip (C) live in extension.js.
 'use strict';
 
 const vscode = require('vscode');
 const path = require('path');
+const crypto = require('crypto');
 
 const STATUS_HUE = {
   waiting: 'yellow',
@@ -38,6 +41,7 @@ const EVENT_GLYPH = {
   'limit-lifted': ['●', 'green'],
   'reset-detected': ['◑', 'blue'],
   'reset-reached': ['●', 'yellow'],
+  grace: ['◷', 'yellow'],
   resumed: ['▶', 'blue'],
   'resume-failed': ['↻', 'red'],
   'resume-finished': ['■', 'desc'],
@@ -74,12 +78,41 @@ function esc(s) {
     .replace(/"/g, '&quot;');
 }
 
+// Coerce a contract value that is supposed to be a number into one before it
+// reaches the page. A JSON-valid-but-hostile string (e.g. an <img onerror=…>
+// smuggled into resume_count) can never survive this, so numeric fields can't
+// carry markup (F10).
+function num(v, dflt) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : dflt;
+}
+
+// Only http(s) links may reach an href. About-row URLs come from workspace
+// settings, so a javascript:/data: scheme would otherwise be a click-to-XSS
+// vector even after HTML-escaping (F10). Returns the (escaped) URL or ''.
+function safeUrl(u) {
+  const s = String(u ?? '').trim();
+  return /^https?:\/\//i.test(s) ? esc(s) : '';
+}
+
+// A fresh per-render nonce authorizes exactly our own inline <script> blocks so
+// the CSP can drop 'unsafe-inline' from script-src (F10). Styles stay inline.
+function makeNonce() {
+  return crypto.randomBytes(16).toString('base64');
+}
+
 // View state persisted across the 5 s auto-refresh (which rebuilds the
 // whole webview HTML). Without this, clicking "Setup" or expanding the CLI
 // reference would snap back on the next poll.
 let _view = null; // 'setup' | 'dashboard' | null (null => pick by readiness)
 let _otherWs = ''; // project selected in the "Other workspaces" composer
 let _cliOpen = false;
+// While the user is typing in a composer, the 5 s auto-refresh must NOT rebuild
+// the HTML — that wiped an in-progress prompt/session/time back to defaults
+// (rate.json alone changes constantly, forcing a re-render mid-keystroke). The
+// webview reports focus in/out of a composer; we defer refreshes until it's
+// done. A forced refresh (the ⟳ button) still goes through.
+let _editing = false;
 
 function attach(webview, host) {
   return webview.onDidReceiveMessage(async (msg) => {
@@ -104,6 +137,15 @@ function attach(webview, host) {
         break;
       case 'setupSensor':
         await host.setupSensor();
+        break;
+      case 'editing':
+        // Composer gained/lost focus — pause/resume auto-refresh so typing
+        // is never clobbered. Refresh once on the way out to catch up.
+        _editing = Boolean(msg.active);
+        if (!_editing) update(host);
+        break;
+      case 'openSession':
+        host.openSession(msg.ws);
         break;
       case 'goSetup':
         _view = 'setup';
@@ -143,6 +185,7 @@ function createOrShow(context, host) {
   panel.onDidDispose(() => {
     panel = undefined;
     _lastSig = null;
+    _editing = false; // don't carry a stuck "editing" flag into the next panel
   });
   const state0 = host.collectState();
   _lastSig = stateSig(state0);
@@ -162,10 +205,11 @@ function resolveSidebar(webviewView, host) {
   webviewView.onDidDispose(() => {
     sidebarView = undefined;
   });
+  const nonce = makeNonce();
   webviewView.webview.html = `<!DOCTYPE html>
 <html><head><meta charset="UTF-8">
 <meta http-equiv="Content-Security-Policy"
-  content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
+  content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
 <style>
   body { font-family: var(--vscode-font-family); color: var(--vscode-descriptionForeground);
          background: transparent; padding: 16px; font-size: 12px; }
@@ -176,7 +220,7 @@ function resolveSidebar(webviewView, host) {
 <body>
   <p>Opening the dashboard…</p>
   <button id="open">Open Dashboard</button>
-  <script>
+  <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
     document.getElementById('open').addEventListener('click',
       () => vscode.postMessage({ type: 'openFull' }));
@@ -207,6 +251,11 @@ function stateSig(state) {
     c: state.cliFound,
     st: state.stateStatus,
     sn: state.sensorRegistered,
+    up: state.updatePending,
+    // Key on the TAIL, not the length: readLiveOutput caps at the last 8000
+    // bytes, so once output passes 8000 the length is pinned and the panel
+    // would stop refreshing. The tail changes as new output streams in.
+    lo: (state.liveOutput || '').slice(-180),
     rt: state.rate,
     d: state.daemons,
     w: state.currentWs,
@@ -220,6 +269,10 @@ function stateSig(state) {
 
 function update(host, force) {
   if (!panel) return;
+  // Never rebuild the HTML out from under someone typing in a composer (unless
+  // they explicitly hit refresh) — that was the "extension reset to default
+  // while I was entering a time" bug.
+  if (!force && _editing) return;
   const state = host.collectState();
   const sig = stateSig(state);
   if (!force && sig === _lastSig) return; // nothing changed — don't clobber input
@@ -417,6 +470,7 @@ function composerCard(idPrefix, ws, state, primary) {
       </div>
       <div class="when-hint dim hint-reset"${hasReset ? '' : ' style="display:none"'}>${resetHint}</div>
       <div class="when-hint dim hint-auto"${hasReset ? ' style="display:none"' : ''}>${autoHint}</div>
+      <div class="when-err c-red" style="display:none">Enter a valid time (hour 1–12, minute 00–59) or pick a preset above.</div>
     </div>
     <div class="c-actions">
       <label class="imp-lbl dim">On reset</label>
@@ -488,7 +542,7 @@ function scheduledList(state, ws) {
     <span class="spacer"></span>
     <span class="${stuck ? 'c-red' : 'dim'} when-lab">${esc(whenLabel)}</span>
     <span class="badge">${promptKind}</span>
-    <span class="dim mono att">${task.resume_count ?? 0}/${task.max_resumes ?? 3}</span>
+    <span class="dim mono att">${esc(num(task.resume_count, 0))}/${esc(num(task.max_resumes, 3))}</span>
     ${cd}
     <button class="x-btn act-cancel" data-ws="${esc(ws)}" title="Cancel this resume" aria-label="Cancel">✕</button>
   </div>`;
@@ -599,12 +653,12 @@ const REPO_URL = 'https://github.com/0xsaju/claude-standby';
 function aboutRow(state) {
   const a = state.author || {};
   const links = [];
-  if (a.github)
-    links.push(`<a href="${esc(a.github)}">${ICON_GH}GitHub</a>`);
-  if (a.linkedin)
-    links.push(`<a href="${esc(a.linkedin)}">${ICON_IN}LinkedIn</a>`);
-  if (a.buyMeACoffee)
-    links.push(`<a href="${esc(a.buyMeACoffee)}">${ICON_COFFEE}Buy me a coffee</a>`);
+  const gh = safeUrl(a.github);
+  const li = safeUrl(a.linkedin);
+  const bmc = safeUrl(a.buyMeACoffee);
+  if (gh) links.push(`<a href="${gh}">${ICON_GH}GitHub</a>`);
+  if (li) links.push(`<a href="${li}">${ICON_IN}LinkedIn</a>`);
+  if (bmc) links.push(`<a href="${bmc}">${ICON_COFFEE}Buy me a coffee</a>`);
   return `<section class="support">
     <div class="support-text">
       <span class="support-title">${STAR} Enjoying Claude Standby?</span>
@@ -620,10 +674,92 @@ function aboutRow(state) {
   </div>`;
 }
 
+// Things worth a prominent red/amber marker in the header (Ask: "if any update
+// pending / any tool misconfigured, show it a little bigger with a red marker").
+function headerAlerts(state) {
+  const a = [];
+  if (!state.cliFound) a.push({ t: 'CLI not found', red: true });
+  if (state.stateStatus === 'corrupt') a.push({ t: 'State file broken', red: true });
+  if ((state.stuckWs || []).length)
+    a.push({ t: `${state.stuckWs.length} resume interrupted`, red: true });
+  if (state.updatePending) a.push({ t: 'Update available', red: true });
+  if (!state.sensorRegistered) a.push({ t: 'Exact resets off', red: false });
+  return a;
+}
+
+// stream-json (or plain) resume output -> a few readable lines for the live
+// panel. Defensive: unknown/!JSON lines pass through; fake-claude's string
+// `content` and real claude's block array are both handled.
+function renderLive(raw) {
+  const out = [];
+  for (const ln of String(raw || '').split('\n')) {
+    const s = ln.trim();
+    if (!s) continue;
+    let o;
+    try { o = JSON.parse(s); } catch { out.push(s); continue; }
+    // A bare `null`/number/string JSON line parses fine but has no `.type`;
+    // guard before property access so one odd line can't throw and break the
+    // whole webview render.
+    if (!o || typeof o !== 'object') continue;
+    if (o.type === 'assistant' && o.message) {
+      const c = o.message.content;
+      if (typeof c === 'string') out.push(c.trim());
+      else if (Array.isArray(c))
+        for (const b of c) {
+          if (b.type === 'text' && b.text) out.push(String(b.text).trim());
+          else if (b.type === 'tool_use') out.push('· ' + (b.name || 'tool'));
+        }
+    } else if (o.type === 'result') {
+      out.push(o.result ? String(o.result).trim() : '· ' + (o.subtype || 'done'));
+    } else if (o.type === 'system' && o.message) {
+      out.push(String(o.message).trim());
+    }
+  }
+  return out.filter(Boolean).slice(-30).join('\n');
+}
+
+// A card that makes a running/finished resume visible: live output while it
+// runs, and a one-click open into the real Claude Code session (D44).
+function resumeCard(state, ws, task) {
+  if (!task || !['resuming', 'done', 'failed'].includes(task.status)) return '';
+  const running = task.status === 'resuming';
+  const label = running
+    ? 'Resuming now — running headless in the background'
+    : task.status === 'done'
+      ? '✓ Resumed & finished'
+      : '✗ Resume failed';
+  const hue = running ? 'blue' : task.status === 'done' ? 'green' : 'red';
+  const body = renderLive(state.liveOutput);
+  const panel = body ? `<pre class="live-out">${esc(body)}</pre>` : '';
+  const openBtn = task.session_id
+    ? `<button class="btn-open act-open" data-ws="${esc(ws)}" title="Continue this conversation in Claude Code">▶ Open in Claude Code</button>`
+    : '';
+  const armed = running
+    ? `<p class="dim armed-note">Running this session in the background — don't resume it manually too, or both run at once.</p>`
+    : '';
+  return `<div class="resume-card card">
+    <div class="rc-head">
+      <span class="dot bg-${hue}${running ? ' pulse' : ''}"></span>
+      <b>${esc(label)}</b>
+      <span class="spacer"></span>
+      ${openBtn}
+    </div>
+    ${panel}
+    ${armed}
+  </div>`;
+}
+
 function dashboardScreen(state) {
   const ws = state.currentWs;
   const task = ws ? state.tasks[ws] : undefined;
   const healthOk = state.cliFound;
+  const alerts = headerAlerts(state);
+  const anyRed = alerts.some((x) => x.red);
+  const alertPill = alerts.length
+    ? `<a id="go-setup-alert" class="alert-pill ${anyRed ? 'red' : 'amber'}" title="${esc(
+        alerts.map((x) => x.t).join(' · ')
+      )}">⚠ ${esc(alerts[0].t)}${alerts.length > 1 ? ` +${alerts.length - 1}` : ''}</a>`
+    : '';
 
   const current = ws
     ? `<div class="ws-head">
@@ -635,6 +771,7 @@ function dashboardScreen(state) {
        ${composerCard('composer-current', ws, state, true)}
        <h3 class="section-title">Scheduled resumes</h3>
        ${scheduledList(state, ws)}
+       ${resumeCard(state, ws, task)}
        ${timelineSection(state, ws)}`
     : `<div class="no-folder card">
          <b>No folder open.</b>
@@ -647,6 +784,7 @@ function dashboardScreen(state) {
       <span class="name">Claude Standby</span>
       <span class="dim ver">v${esc(state.extVersion || '')}</span>
       <span class="spacer"></span>
+      ${alertPill}
       <span class="health" title="CLI ${state.cliFound ? 'found' : 'missing'} · ${state.daemons} daemon(s)">
         <span class="dot bg-${healthOk ? 'green' : 'orange'}"></span>${
     healthOk ? 'healthy' : 'setup needed'
@@ -677,12 +815,13 @@ function dashboardScreen(state) {
 function render(state) {
   const view = _view || (state.ready ? 'dashboard' : 'setup');
   const body = view === 'setup' ? setupScreen(state) : dashboardScreen(state);
+  const nonce = makeNonce();
   return `<!DOCTYPE html>
 <html>
 <head>
 <meta charset="UTF-8">
 <meta http-equiv="Content-Security-Policy"
-  content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
+  content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
 <style>
   :root { color-scheme: light dark; }
   * { box-sizing: border-box; }
@@ -814,6 +953,26 @@ function render(state) {
     border: 1px solid var(--vscode-input-border, var(--vscode-widget-border, rgba(128,128,128,.35)));
     color: var(--vscode-foreground);
   }
+  .alert-pill {
+    font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 11px;
+    text-decoration: none; margin-right: 6px; white-space: nowrap;
+  }
+  .alert-pill.red { color: #fff; background: var(--vscode-charts-red, #d64545); }
+  .alert-pill.amber { color: #1c1c1c; background: var(--vscode-charts-yellow, #e0a500); }
+  .resume-card { margin-top: 12px; }
+  .rc-head { display: flex; align-items: center; gap: 8px; }
+  .btn-open {
+    font-size: 12px; padding: 4px 12px; border: 1px solid #F59E0B; border-radius: 4px;
+    background: rgba(245,158,11,.10); color: #F59E0B; cursor: pointer;
+  }
+  .btn-open:hover { background: rgba(245,158,11,.18); }
+  .live-out {
+    margin: 10px 0 0; padding: 10px 12px; max-height: 220px; overflow: auto;
+    background: var(--vscode-textCodeBlock-background, rgba(128,128,128,.10));
+    border-radius: 4px; font-family: var(--vscode-editor-font-family, ui-monospace, Menlo, monospace);
+    font-size: 12px; line-height: 1.45; white-space: pre-wrap; word-break: break-word;
+  }
+  .armed-note { margin: 8px 0 0; font-size: 11.5px; }
   .chip:hover { border-color: var(--vscode-descriptionForeground); }
   .chip:disabled { opacity: .45; cursor: not-allowed; }
   .chip:disabled:hover { border-color: var(--vscode-input-border, var(--vscode-widget-border, rgba(128,128,128,.35))); }
@@ -825,6 +984,7 @@ function render(state) {
   .seg { font-size: 12px; padding: 5px 9px; border: none; background: var(--vscode-input-background); color: var(--vscode-descriptionForeground); }
   .seg.on { background: #F59E0B; color: #1a1200; font-weight: 600; }
   .when-hint { font-size: 11.5px; }
+  .when-err { font-size: 11.5px; margin-top: 5px; }
   .c-actions { display: flex; align-items: center; gap: 10px; margin-top: 16px; }
   .imp-lbl { font-size: 11px; }
   .tier { font-size: 12px; padding: 4px 8px; }
@@ -896,8 +1056,8 @@ function render(state) {
 </head>
 <body>
 ${body}
-<script type="application/json" id="data-sessions">${jsonBlock(state.sessionsByWs || {})}</script>
-<script>
+<script type="application/json" id="data-sessions" nonce="${nonce}">${jsonBlock(state.sessionsByWs || {})}</script>
+<script nonce="${nonce}">
   const vscode = acquireVsCodeApi();
   const $ = (s, el) => (el || document).querySelector(s);
   const $$ = (s, el) => Array.from((el || document).querySelectorAll(s));
@@ -909,6 +1069,7 @@ ${body}
 
   on('refresh', 'click', () => send('refresh'));
   on('go-setup', 'click', () => send('goSetup'));
+  on('go-setup-alert', 'click', () => send('goSetup'));
   on('go-dashboard', 'click', () => send('goDashboard'));
   on('openLog', 'click', () => send('openLog'));
   on('openConfig', 'click', () => send('openConfig'));
@@ -956,7 +1117,17 @@ ${body}
     n.value = 'new';
     n.textContent = '＋ New chat (starts fresh — no history)';
     sel.append(n);
-    sel.value = pinned && list.some((s) => s.id === pinned) ? pinned : (list[0] ? list[0].id : 'new');
+    // The session list is capped (6 newest), but the pinned session must stay
+    // selectable even when it's older than that window — otherwise submitting
+    // silently swaps the user's pin for the newest visible chat (F06). If the
+    // pin isn't among the visible options, inject it at the top.
+    if (pinned && !list.some((s) => s.id === pinned)) {
+      const po = document.createElement('option');
+      po.value = pinned;
+      po.textContent = 'pinned · ' + pinned.slice(0, 8) + ' (keep current)';
+      sel.insertBefore(po, sel.firstChild);
+    }
+    sel.value = pinned ? pinned : (list[0] ? list[0].id : 'new');
   }
 
   function wireComposer(comp) {
@@ -968,8 +1139,10 @@ ${body}
     const segs = $$('.seg', comp);
     const hintReset = $('.hint-reset', comp);
     const hintAuto = $('.hint-auto', comp);
+    const whenErr = $('.when-err', comp);
     const prompt = $('.prompt-input', comp);
     const resetBtn = $('.reset-prompt', comp);
+    const hideTimeErr = () => { if (whenErr) whenErr.style.display = 'none'; };
 
     // Each mode shows its own one-line hint; a relative/clock chip shows none.
     const showHint = (when) => {
@@ -980,11 +1153,13 @@ ${body}
       chips.forEach((x) => x.classList.toggle('selected', x === c));
       if (whenRow) whenRow.classList.add('chip-active'); // dim the time fields
       showHint(c && c.dataset.when);
+      hideTimeErr();
     };
     const clearChips = () => {
       chips.forEach((x) => x.classList.remove('selected'));
       if (whenRow) whenRow.classList.remove('chip-active');
       showHint(null);
+      hideTimeErr();
     };
     chips.forEach((c) => c.addEventListener('click', () => selectChip(c)));
     [hour, min].forEach((el) => el && el.addEventListener('focus', clearChips));
@@ -1014,13 +1189,16 @@ ${body}
         let h = parseInt(hour.value, 10);
         const m = parseInt(min.value, 10);
         if (isNaN(h) || isNaN(m) || h < 1 || h > 12 || m < 0 || m > 59) {
-          when = 'auto';
-        } else {
-          const ap = ($('.seg.on', comp) || {}).dataset ? $('.seg.on', comp).dataset.ap : 'PM';
-          if (ap === 'PM' && h < 12) h += 12;
-          if (ap === 'AM' && h === 12) h = 0;
-          when = String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
+          // Never silently downgrade a bad clock time to auto-detect — that
+          // starts real quota-bearing probing the user didn't ask for (F06).
+          // Surface it and refuse to submit until it's fixed or a chip is used.
+          if (whenErr) whenErr.style.display = '';
+          return;
         }
+        const ap = ($('.seg.on', comp) || {}).dataset ? $('.seg.on', comp).dataset.ap : 'PM';
+        if (ap === 'PM' && h < 12) h += 12;
+        if (ap === 'AM' && h === 12) h = 0;
+        when = String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
       }
       const p = prompt ? prompt.value.trim() : '';
       send('schedule', {
@@ -1034,8 +1212,20 @@ ${body}
   }
   $$('.composer').forEach(wireComposer);
 
+  // Pause auto-refresh while a composer is focused so a poll can't rebuild the
+  // HTML mid-typing and reset the fields. focusout fires as focus MOVES; only
+  // treat it as "done" when focus actually left this composer.
+  $$('.composer').forEach((c) => {
+    c.addEventListener('focusin', () => send('editing', { active: true }));
+    c.addEventListener('focusout', (e) => {
+      if (!c.contains(e.relatedTarget)) send('editing', { active: false });
+    });
+  });
+
   // cancel buttons
   $$('.act-cancel').forEach((b) => b.addEventListener('click', () => send('cancel', { ws: b.dataset.ws })));
+  // open the resumed conversation in Claude Code
+  $$('.act-open').forEach((b) => b.addEventListener('click', () => send('openSession', { ws: b.dataset.ws })));
 
   // live countdown
   function tick() {

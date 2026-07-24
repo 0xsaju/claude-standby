@@ -106,8 +106,14 @@ directory Claude Code is running in.
 **The daemon.** Scheduling spawns a small background process that survives
 your Claude Code session ending. It wakes every 60 seconds, re-reads state,
 and acts when the reset time passes. Because it re-reads state each tick,
-cancelling or rescheduling always takes effect within a minute. One daemon
-per workspace; scheduling twice doesn't stack daemons.
+cancelling or rescheduling before the resume fires always takes effect
+within a minute (it's also re-checked immediately before `claude` is
+invoked, so a change landing during the grace window still preempts the
+stale schedule). The one case that isn't preemptible: once a resume is
+actually **running**, only `cancel` interrupts it — a reschedule issued
+while it's in flight takes effect after that attempt finishes, not
+mid-attempt. One daemon per workspace; scheduling twice doesn't stack
+daemons.
 
 **Exact reset detection (no polling).** Claude Code streams your live
 usage — `used_percentage` and the exact `resets_at` — to its status-line
@@ -288,6 +294,18 @@ before, or the default). `--workspace <path>` (or `-w`) schedules for
 another project directory instead of the current one — session pinning
 and `--session` indexes then refer to *that* workspace's sessions.
 
+### `claude-standby output [--workspace <path>]`
+
+Show the resume's output. Resumes run **headless in the background** (they
+continue your pinned session in place — `claude --resume <id>` reopens it and
+the resumed work is right there), so this is how you watch a running resume
+from the terminal. The daemon streams each resume to this file live. By default
+it is **plain output** (so the daemon's limit detection stays on the measured
+format); set `AR_CFG_RESUME_STREAM=1` for **stream-json**, a richer per-step
+live panel — at the cost of running detection on an unverified format. The
+cockpit shows the same output as a live panel with a one-click **Open in Claude
+Code**.
+
 ### `claude-standby sessions [--workspace <path>]`
 
 Lists a workspace's Claude Code sessions (from `~/.claude/projects/`;
@@ -345,10 +363,15 @@ checkout.
 
 ### `claude-standby uninstall [--yes]`
 
-Removes the install directory and the CLI link after confirmation
-(`--yes` skips the prompt). Your task state and logs under
-`~/.claude/auto-resume` are kept; the command prints how to remove them.
-A git checkout with uncommitted changes is refused so it can't eat a
+Stops every daemon it finds under `~/.claude/auto-resume/daemons` first —
+if a daemon won't stop, uninstall refuses rather than leave one running
+against a deleted install. It also removes the status-line sensor
+registration (and aborts if that removal fails, so `settings.json` is never
+left pointing at a deleted script). Then it removes the install directory
+and the CLI link after confirmation (`--yes` skips the prompt). Your task
+state and logs under `~/.claude/auto-resume` are kept; the command prints
+how to remove them. A git checkout with uncommitted changes is refused so
+it can't eat a
 development copy — except the installer-managed directory
 (`~/.claude-standby`), which is always removable (host filesystems can
 dirty an installed clone through no fault of yours; you'll get a note that
@@ -485,11 +508,14 @@ the machine is awake past the reset time.
 claude-standby uninstall
 ```
 
-This removes the install and the CLI link (and the status-line sensor if you
-added one). Then remove runtime data if you want a clean slate:
+This stops any running daemon first, then removes the install and the CLI
+link (and the status-line sensor if you added one) — it refuses instead of
+leaving a daemon running against a deleted install. Then remove runtime data
+if you want a clean slate:
 
 ```sh
 rm -rf ~/.claude/auto-resume
 ```
 
-Any waiting daemon exits on its next tick once the state file is gone.
+(That's not required for the daemon: uninstall already stopped it. This is
+only for scrubbing task history, logs, and the rate cache.)

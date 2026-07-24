@@ -1,0 +1,23 @@
+name: Test suite
+
+# Runs the shell test suite (test/run-tests.sh) on both macOS and Linux for
+# every push and pull request, closing the "no Linux CI" gap: the engine
+# targets Linux + macOS with Windows best-effort (C2), but until now only
+# whatever a developer ran locally (usually macOS) was ever exercised in CI.
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run test suite
+        run: bash test/run-tests.sh

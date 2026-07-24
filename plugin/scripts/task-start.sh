@@ -21,12 +21,24 @@ if [ -z "$PROMPT" ]; then
 fi
 
 WS="$(pwd)"
-# session_id stays empty here; resume-at discovers it from the session
-# store (HOOK-FINDINGS F2) and pins it at schedule time.
+# `start` begins a NEW task. ar_task_upsert MERGES onto any existing record,
+# so we must explicitly reset every field that belongs to a prior task's
+# lifecycle — otherwise the new task inherits the old task's pinned session,
+# "already saw a limit" flags, custom resume prompt, spent attempt budget, and
+# daemon ownership, and a later resume-at would continue the WRONG, unrelated
+# conversation (F04). session_id is cleared here; resume-at (HOOK-FINDINGS F2)
+# discovers and pins the right session at schedule time.
 if ! ar_task_upsert "$WS" \
     "status=running" \
     "importance=$IMPORTANCE" \
     "original_prompt=$PROMPT" \
+    "session_id=" \
+    "limit_seen=0" \
+    "limit_seen_at=" \
+    "armed_noted=0" \
+    "armed_since=" \
+    "daemon_pid=" \
+    "resume_prompt_template=$AR_DEFAULT_RESUME_PROMPT" \
     "resume_count=0"; then
   echo "auto-resume: could not write state file ($AR_STATE_FILE) — see $AR_LOG_DIR/plugin.log"
   exit 0

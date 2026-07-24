@@ -6,13 +6,19 @@ name: Publish extension
 # releases separate from the plugin's own versioning), or run it by hand from
 # the Actions tab. It publishes whatever version is in
 # vscode-extension/package.json — that file is the source of truth, so the
-# tag is only the trigger. Bump the version there BEFORE tagging.
+# tag is only the trigger. Bump the version there BEFORE tagging. On a tag
+# push, the workflow verifies the tag's version matches package.json and
+# fails fast if they disagree.
 #
 # Required repo secrets (Settings -> Secrets and variables -> Actions):
 #   VSCE_PAT    Azure DevOps PAT, scope "Marketplace: Manage",
 #               organization "All accessible organizations".
 #   OVSX_TOKEN  Open VSX access token (open-vsx.org -> Settings -> Access Tokens).
 # A missing secret simply skips that registry — set only the ones you use.
+#
+# Supply-chain hardening: the publisher CLIs (@vscode/vsce, ovsx) are pinned
+# to exact versions and installed BEFORE any registry secret is exposed to
+# the environment. Each publish step only sees its own token, not both.
 
 on:
   push:
@@ -26,9 +32,6 @@ jobs:
     defaults:
       run:
         working-directory: vscode-extension
-    env:
-      VSCE_PAT: ${{ secrets.VSCE_PAT }}
-      OVSX_TOKEN: ${{ secrets.OVSX_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
@@ -36,13 +39,43 @@ jobs:
         with:
           node-version: 20
 
+      - name: Run full test suite
+        working-directory: .
+        run: bash test/run-tests.sh
+
+      - name: Verify tag matches package.json version
+        if: startsWith(github.ref, 'refs/tags/ext-v')
+        run: |
+          tag_version="${GITHUB_REF#refs/tags/ext-v}"
+          pkg_version="$(node -p "require('./package.json').version")"
+          if [ "$tag_version" != "$pkg_version" ]; then
+            echo "Tag ext-v$tag_version does not match package.json version $pkg_version" >&2
+            exit 1
+          fi
+
+      - name: Install pinned publisher tooling
+        run: npm install --no-save @vscode/vsce@3.9.2 ovsx@1.0.2
+
       - name: Package the VSIX
-        run: npx --yes @vscode/vsce package --no-dependencies -o extension.vsix
+        run: npx vsce package --no-dependencies -o extension.vsix
+
+      - name: Verify packaged artifact version
+        run: |
+          vsix_version="$(unzip -p extension.vsix extension/package.json | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).version")"
+          pkg_version="$(node -p "require('./package.json').version")"
+          if [ "$vsix_version" != "$pkg_version" ]; then
+            echo "Packaged VSIX version $vsix_version does not match package.json version $pkg_version" >&2
+            exit 1
+          fi
 
       - name: Publish to VS Code Marketplace
-        if: ${{ env.VSCE_PAT != '' }}
-        run: npx --yes @vscode/vsce publish --no-dependencies --packagePath extension.vsix -p "$VSCE_PAT"
+        if: ${{ secrets.VSCE_PAT != '' }}
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: npx vsce publish --no-dependencies --packagePath extension.vsix -p "$VSCE_PAT"
 
       - name: Publish to Open VSX
-        if: ${{ env.OVSX_TOKEN != '' }}
-        run: npx --yes ovsx publish extension.vsix -p "$OVSX_TOKEN"
+        if: ${{ secrets.OVSX_TOKEN != '' }}
+        env:
+          OVSX_TOKEN: ${{ secrets.OVSX_TOKEN }}
+        run: npx ovsx publish extension.vsix -p "$OVSX_TOKEN"

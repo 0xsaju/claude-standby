@@ -47,16 +47,25 @@ itself.
 ### Contract — `~/.claude/auto-resume/state.json`
 
 Everything the daemon knows lives here; anything a UI needs, it reads here.
-The `commands` array is the UI→daemon channel (e.g.
-`{"cmd": "resume-now", "workspace": "..."}`).
+
+The `commands` array is **reserved, not implemented** (F31, 2026-07-24
+audit): it was documented as a future UI→daemon channel, but nothing
+writes or reads it today — every cockpit action goes through the CLI
+(D21), which mutates `tasks` directly. It stays in the schema as an empty
+placeholder so a future writer doesn't need a version bump to add it; treat
+it as dead until something actually consumes it, at which point document
+the real shape here first.
 
 Schema changes require a `version` bump and an entry in `docs/DECISIONS.md`.
+Additive optional fields with a safe default may keep the current version
+(D27/D28 precedent) — see D46 for the v2→v3 bump and why it *was* required
+that time.
 
-## state.json schema (v2)
+## state.json schema (v3)
 
 ```json
 {
-  "version": 2,
+  "version": 3,
   "tasks": {
     "<workspace-abs-path>": {
       "session_id": "",
@@ -75,8 +84,10 @@ Schema changes require a `version` bump and an entry in `docs/DECISIONS.md`.
       "armed_noted": "0 | 1 — the 'armed, waiting for a limit' note was journaled once",
       "armed_since": "epoch when arming began (bounds the armed window, D28)",
       "daemon_pid": "pid of the daemon that owns this task (interrupted-resume detection, D28)",
+      "resume_generation": "counter bumped on every reschedule (v3, D46/F05) — lets the daemon detect and abandon a stale in-flight schedule instead of resuming the one the user just replaced",
+      "stall_count": "consecutive clean-exit resumes that made no measurable progress (v3, D46/F29) — compared against progress_file's content fingerprint; crossing AR_CFG_STALL_MAX marks the task stuck instead of done",
       "journal": [
-        { "ts": "", "event": "limit-hit | resumed | done | failed | cancelled", "detail": "" }
+        { "ts": "", "event": "limit-hit | resumed | done | failed | cancelled | stall | stuck | quiet-hours | …", "detail": "" }
       ]
     }
   },
@@ -98,9 +109,17 @@ Field notes:
   with a minimal cheap call until the limit provably lifts, then resume.
   Absent field ⇒ `at` (v1 files stay readable).
 - **resume_count / max_resumes** — safety rail C5; the daemon refuses to
-  resume past the cap.
+  resume past the cap; both are numeric-validated before the comparison so a
+  corrupt/non-numeric value fails closed instead of bypassing the cap.
 - **last_output_tail** — final transcript lines at stop time, surfaced in
   the UI (and reserved for the planned resume-verification fallback prompt).
+- **resume_generation** (v3, D46) — see F05 above: every `resume-at` bumps
+  it, and the daemon re-checks it right before invoking `claude`, so a
+  reschedule issued during the grace window or the final pre-exec instant
+  still preempts the old schedule.
+- **stall_count** (v3, D46) — see C5/F29: only judged when `progress_file`
+  exists and has content, so a workspace without one keeps the prior
+  behavior and never raises a false stall.
 - **journal** — append-only event history; the UI's timeline source.
 
 ## Two entry points into the wait-and-resume cycle

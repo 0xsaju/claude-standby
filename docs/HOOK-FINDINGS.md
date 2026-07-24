@@ -16,6 +16,19 @@ stream (F4) — are documented below and in active use.**
 Detection logic must cite this file and match only formats documented here.
 No invented formats.
 
+> **Provenance note (F36, 2026-07-24 audit).** Each finding below is a
+> transcribed, sanitized sample from one manual session — the caveats
+> ("one sample", "unmeasured", limited path sampling) stated inline per
+> finding are load-bearing, not boilerplate. This repository intentionally
+> does **not** check in the raw capture artifacts behind these findings
+> (real session ids, absolute paths, account usage numbers) — publishing
+> them would leak the maintainer's real Claude Code data for no correctness
+> benefit, a reasonable solo-alpha privacy tradeoff (see `docs/DECISIONS.md`
+> D46). One practical consequence: an outside contributor cannot
+> independently re-derive F1/F2/F4 from artifacts in this repo alone —
+> only by reproducing the documented repro steps against their own real
+> account.
+
 ## Open questions (historical — the hook path was dropped, see note above)
 
 | # | Question | Why it matters | Answer |
@@ -25,7 +38,7 @@ No invented formats.
 | Q3 | Does only `Notification` carry the limit message? | Then Notification becomes the detection point | *unknown* |
 | Q4 | Does the transcript tail contain the limit text + reset time? | That's the parse source for `resume_at` | *unknown* |
 | Q5 | Exact wording/format of the limit message and reset timestamp? | Drives the `resume_at` parser and fake-claude fixture | **F1** for headless stdout; hooks/transcript pending |
-| Q6 | Same behavior in headless (`-p`) mode as interactive? | The daemon resumes headlessly; detection must work there | *unknown* |
+| Q6 | Same behavior in headless (`-p`) mode as interactive? | The daemon resumes headlessly; detection must work there | **Yes — append-in-place** (2026-07-23, D44): a headless `claude --resume <id> -p "…"` continues the SAME session, and reopening `claude --resume <id>` shows the headless exchange. So a resume's work lands in the pinned session and is visible there; `--fork-session` (F3) is the only branch path and the daemon never passes it. Still unmeasured: whether `--output-format stream-json` flushes incrementally at a real resume (the live panel assumes it does). |
 | Q7 | Does *nothing* fire? | Then we switch to the supervisor-wrapper fallback (see ARCHITECTURE.md) | *unknown* |
 
 ## Findings

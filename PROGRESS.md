@@ -387,3 +387,55 @@ was separately cancelled by them at 14:38 and the 15:11 window passed, so it
 needs a fresh reschedule under 0.9.3 (or a state.json repair) to clear the
 stale count. Extension still 0.9.2, marketplace publish still blocked on the
 VSCE_PAT/OVSX_TOKEN secrets.
+
+## 2026-07-23 (evening) — Auto-resume made visible (D44), engine + extension both 0.9.4 (aligned)
+
+Big visibility slice from a run of field reports: a headless resume was
+invisible (ran detached, output captured only at the end), so a working resume
+looked like "it did nothing" and users manually re-resumed (double-run). First
+VERIFIED Q6 via the user's own manual test — headless `claude --resume <id> -p`
+appends in place and is visible on reopening; so the pinned session_id already
+points at the resumed conversation (no schema change to "open" it). Built:
+(1) live output — daemon streams each resume to a per-workspace live file with
+`--output-format stream-json --verbose` (gated by AR_CFG_RESUME_STREAM, default
+on; $out read back from the file so tail + bounce guard still work), new
+`claude-standby output` command, cockpit live panel; (2) ▶ Open in Claude Code
+(terminal `claude --resume <id>`) in cockpit + status hint; (3) grace timing —
+normal-tier grace now publishes resume_at=now+grace + a `grace` journal event
+so the countdown shows the real moment; (4) header red/amber alert pill
+(CLI-missing / state-broken / resume-interrupted / update-available /
+sensor-off); (5) FIXED the composer-reset-while-typing bug — auto-refresh is
+suppressed while a composer is focused (was: rate.json churn forced a full
+re-render mid-keystroke, wiping prompt/session/time). No state.json schema
+change (live file host-local, open reuses session_id). +8 engine tests → 281
+green; cockpit render covered by an out-of-tree smoke test (stream-json both
+shapes, alerts, open button, done/resuming labels).
+
+Handoff: engine 0.9.4 needs a release cut; extension 0.9.4 needs packaging +
+marketplace publish (still blocked on VSCE_PAT/OVSX_TOKEN secrets). Open
+(C6-style): whether stream-json flushes incrementally at a REAL resume — if it
+buffers, the live panel lags on long tasks (off-switch → plain output). The
+double-resume guard is currently just a cockpit warning (can't block a user's
+own `claude`).
+
+## 2026-07-24 — Pre-publish audit of v0.9.4 (D45)
+
+Multi-agent audit (8 finders → 19 findings); verification phase hit the session
+limit, so findings were verified by direct code inspection and fixed. Full
+report: docs/audit-0.9.4.md. Top fix: stream-json resume was the DEFAULT, which
+ran limit detection (a C5 safety rail) on an unmeasured format (C1/C6) —
+flipped AR_CFG_RESUME_STREAM to default OFF (plain output, safe detection);
+stream-json is now opt-in for the granular live panel. Also fixed: renderLive
+null-throw (broke the whole webview), non-interactive installer enabling the
+sensor without consent, live-panel freeze past 8000 bytes, output --workspace
+canonicalization + glued form, unvalidated session_id in the cockpit terminal
+command, stuck _editing on dispose, duplicate --output-format; docs reconciled
+to plain-default; first cockpit-JS coverage in the suite (test/cockpit-smoke.js
++ node-guarded node --check). 286 tests green. 3 low/info items accepted
+(non-ASCII path divergence, single-global editing flag, live-file retention).
+No schema change; VERSION stays 0.9.4.
+
+Handoff: all uncommitted (working tree). Repackaged the 0.9.4 vsix. Still
+pending owner action: cut the v0.9.4 engine release + publish the vsix
+(marketplace secrets). Optional follow-up to make stream-json safe-by-default:
+measure real claude's stream-json limit output → HOOK-FINDINGS, then default on.

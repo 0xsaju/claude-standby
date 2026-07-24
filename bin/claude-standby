@@ -13,6 +13,7 @@
 #
 # Check & control:
 #   status              this project's task (the default command)
+#   output [--workspace <path>]   show the resume's live/last output
 #   sessions            list this project's conversations (pick which resumes)
 #   list                every tracked project
 #   watch | log [n]     follow / show the daemon log
@@ -46,6 +47,53 @@ fi
 
 LOG_FILE="${CLAUDE_STANDBY_LOG_DIR:-$HOME/.claude/auto-resume/logs}/plugin.log"
 INSTALL_URL="https://raw.githubusercontent.com/0xsaju/claude-standby/main/install.sh"
+# Same default layout doctor/daemon.sh use (via lib.sh's AR_HOME) — computed
+# here without a full lib.sh source so `uninstall` can find daemon pidfiles
+# even though it doesn't otherwise need the library (F18).
+AR_HOME_DIR="$(dirname "${CLAUDE_STANDBY_STATE:-$HOME/.claude/auto-resume/state.json}")"
+
+# Stop every ownership-plausible daemon under $1/daemons/*.pid before we let
+# the caller remove files out from under it (F18). Ownership check: the pid
+# must be a live process whose command line actually mentions daemon.sh —
+# never signal a PID that was merely reused for something unrelated.
+stop_workspace_daemons() {
+  local dir="$1/daemons" p pid cmd stopped=0 failed=0 tries
+  [ -d "$dir" ] || return 0
+  for p in "$dir"/*.pid; do
+    [ -e "$p" ] || break
+    pid="$(cat "$p" 2>/dev/null | tr -dc '0-9')"
+    if [ -z "$pid" ] || [ "$pid" -le 1 ] 2>/dev/null; then
+      rm -f "$p"
+      continue
+    fi
+    if kill -0 "$pid" 2>/dev/null; then
+      cmd="$(ps -p "$pid" -o command= 2>/dev/null || ps -p "$pid" -o args= 2>/dev/null)"
+      case "$cmd" in
+        *daemon.sh*)
+          kill "$pid" 2>/dev/null
+          tries=0
+          while kill -0 "$pid" 2>/dev/null && [ "$tries" -lt 5 ]; do
+            sleep 1
+            tries=$((tries + 1))
+          done
+          if kill -0 "$pid" 2>/dev/null; then
+            kill -9 "$pid" 2>/dev/null
+            sleep 1
+          fi
+          if kill -0 "$pid" 2>/dev/null; then
+            echo "warning: could not stop daemon pid $pid ($(basename "$p" .pid))" >&2
+            failed=$((failed + 1))
+          else
+            stopped=$((stopped + 1))
+          fi
+          ;;
+      esac
+    fi
+    rm -f "$p"
+  done
+  [ "$stopped" -gt 0 ] && echo "Stopped $stopped daemon(s)."
+  [ "$failed" -eq 0 ]
+}
 
 usage() {
   # Print the header comment block (from line 4) up to the first non-comment.
@@ -86,6 +134,34 @@ case "$CMD" in
   sessions)
     exec bash "$SCRIPTS_DIR/task-sessions.sh" "$@" ;;
 
+  output)
+    # Show the resume's streamed output for a workspace (cwd, or --workspace
+    # <path>). The daemon streams each resume to this file live (D44); when it
+    # is absent, fall back to the captured tail in state.
+    # shellcheck disable=SC1091
+    . "$SCRIPTS_DIR/lib.sh" || exit 1
+    OWS="$(pwd)"
+    # Accept the same --workspace forms resume-at does (spaced, glued, -w).
+    case "${1:-}" in
+      --workspace|-w) [ -n "${2:-}" ] && OWS="$2" ;;
+      --workspace=*)  OWS="${1#--workspace=}" ;;
+    esac
+    # Canonicalize (trailing slash / relative path) so we derive the SAME key
+    # the daemon wrote the live file and state under.
+    [ -d "$OWS" ] && OWS="$(cd "$OWS" 2>/dev/null && pwd)"
+    OFILE="$(ar_resume_live_file "$OWS")"
+    if [ -s "$OFILE" ]; then
+      cat "$OFILE"
+    else
+      TAIL="$(ar_task_get "$OWS" last_output_tail)"
+      if [ -n "$TAIL" ]; then
+        printf '%s\n' "$TAIL"
+      else
+        echo "No resume output yet for $OWS."
+      fi
+    fi
+    exit 0 ;;
+
   cancel)
     exec bash "$SCRIPTS_DIR/task-cancel.sh" ;;
 
@@ -114,7 +190,14 @@ EOF
     exit 0 ;;
 
   watch)
-    touch "$LOG_FILE" 2>/dev/null
+    if ! mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null; then
+      echo "claude-standby: cannot create log directory $(dirname "$LOG_FILE")" >&2
+      exit 1
+    fi
+    if ! touch "$LOG_FILE" 2>/dev/null; then
+      echo "claude-standby: cannot create log file $LOG_FILE" >&2
+      exit 1
+    fi
     exec tail -f "$LOG_FILE" ;;
 
   doctor)
@@ -132,12 +215,18 @@ EOF
       RC=1
     fi
     printf '  %-8s %-5s %s\n' "json" "ok" "engine: $(ar_json_engine)"
-    if [ -f "$AR_STATE_FILE" ]; then
-      N="$(ar_task_list | grep -c . || true)"
-      printf '  %-8s %-5s %s\n' "state" "ok" "$AR_STATE_FILE ($N task(s))"
-    else
-      printf '  %-8s %-5s %s\n' "state" "ok" "none yet (will be $AR_STATE_FILE)"
-    fi
+    # F22: validate the state file's health, don't just check existence — a
+    # corrupt or unsupported-schema file must report BAD and exit nonzero, not
+    # a cheerful "ok".
+    SH="$(ar_state_health 2>/dev/null)"
+    case "$SH" in
+      ok)      N="$(ar_task_list | grep -c . || true)"
+               printf '  %-8s %-5s %s\n' "state" "ok" "$AR_STATE_FILE ($N task(s))" ;;
+      missing) printf '  %-8s %-5s %s\n' "state" "ok" "none yet (will be $AR_STATE_FILE)" ;;
+      corrupt) printf '  %-8s %-5s %s\n' "state" "BAD" "$AR_STATE_FILE is corrupt (unparseable) — fix or remove it"; RC=1 ;;
+      unsupported) printf '  %-8s %-5s %s\n' "state" "BAD" "$AR_STATE_FILE is an unsupported schema version — upgrade claude-standby"; RC=1 ;;
+      *)       printf '  %-8s %-5s %s\n' "state" "BAD" "$AR_STATE_FILE health could not be determined"; RC=1 ;;
+    esac
     RUNNING=0; STALE=0
     for p in "$AR_HOME/daemons"/*.pid; do
       [ -e "$p" ] || break
@@ -211,7 +300,17 @@ EOF
       fi
       case "$ANS" in y|Y|yes|YES) ;; *) echo "Aborted."; exit 0 ;; esac
     fi
-    bash "$SCRIPTS_DIR/setup-statusline.sh" remove 2>/dev/null | grep -v "nothing to remove" || true
+    if ! stop_workspace_daemons "$AR_HOME_DIR"; then
+      echo "Refusing to remove $ROOT while a daemon is still running — retry once it stops, or kill it manually." >&2
+      exit 1
+    fi
+    SENSOR_OUT="$(bash "$SCRIPTS_DIR/setup-statusline.sh" remove 2>&1)"
+    SENSOR_RC=$?
+    printf '%s\n' "$SENSOR_OUT" | grep -v "nothing to remove" || true
+    if [ "$SENSOR_RC" -ne 0 ]; then
+      echo "Could not remove the status-line sensor — aborting uninstall so settings.json isn't left referencing a deleted script." >&2
+      exit 1
+    fi
     [ -L "$ORIG0" ] && rm -f "$ORIG0"
     FOUND_LINK="$(command -v claude-standby 2>/dev/null || true)"
     if [ -n "$FOUND_LINK" ] && [ -L "$FOUND_LINK" ]; then
