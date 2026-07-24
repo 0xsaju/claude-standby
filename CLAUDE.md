@@ -56,6 +56,8 @@ path was removed 2026-07-19 (D31): detection reads local data, not hooks.
   status line; always exit 0 (C4)
 - `plugin/scripts/setup-statusline.sh` — (de)register the sensor in
   ~/.claude/settings.json (opt-in; python3 JSON edit, backup, reversible)
+- `plugin/scripts/update-check.sh` — TTY-only, cached release discovery for
+  `status`/`doctor` plus forced `update --check`; never called by daemon/sensor
 - `plugin/scripts/task-*.sh` — command backends
   (task-resume-at.sh = scheduling + spawns the daemon, D10)
 - `bin/claude-standby` — the CLI, the only interface (D15/D17)

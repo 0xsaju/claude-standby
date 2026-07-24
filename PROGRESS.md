@@ -484,3 +484,24 @@ suite, packages, publishes to VS Marketplace + Open VSX **if** the
 VSCE_PAT/OVSX_TOKEN repo secrets exist — still the standing blocker; skips
 gracefully otherwise). Cut a fresh engine GitHub Release (D39 rule) so
 `latest/download` serves 0.9.5. C6 real-limit `--resume` proof still open.
+
+## 2026-07-24 (evening) — CLI automatic update awareness, v0.9.6 (D48)
+
+CLI-only users are no longer blind to releases. Added a portable
+`update-check.sh` backend and `claude-standby update --check`; interactive
+`status`/`doctor` check the official GitHub latest release at most daily,
+using an owner-only non-executable cache and strict semver. Automatic checks
+are TTY-only, two-second-bounded, opt-out (`AR_CFG_UPDATE_CHECK=0`), silent on
+failure, and never run from the daemon/sensor. Updating itself remains manual
+through the existing validated swap. Install/update seeds the cache so it does
+not immediately re-check.
+
+CLI + extension moved to 0.9.6 and the normal macOS/Linux test workflow now
+guards version equality. Extension publication remains manual (documented in
+`docs/PUBLISHING.md`); the unused CI publisher workflow was removed. Added
+hermetic release/cache/offline/opt-out tests and corrected two old daemon-test
+assumptions: an already-running resume is not preempted by reschedule, and
+background children/zombies must be tested using the detached production
+lifecycle. The complete suite is green at 398 passing tests and the README badge
+now reflects that count. Remaining owner release actions are to manually
+package/publish the extension and cut the v0.9.6 engine release asset.

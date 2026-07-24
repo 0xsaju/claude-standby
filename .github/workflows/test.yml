@@ -1,9 +1,8 @@
 name: Test suite
 
-# Runs the shell test suite (test/run-tests.sh) on both macOS and Linux for
-# every push and pull request, closing the "no Linux CI" gap: the engine
-# targets Linux + macOS with Windows best-effort (C2), but until now only
-# whatever a developer ran locally (usually macOS) was ever exercised in CI.
+# Runs the shell test suite on both macOS and Linux for every push and pull
+# request. Version alignment is checked first so the CLI, extension, and
+# release tags cannot drift apart.
 
 on:
   push:
@@ -18,6 +17,24 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Verify CLI and extension versions stay aligned
+        run: |
+          cli_version="$(tr -d '[:space:]' < VERSION)"
+          ext_version="$(node -p "require('./vscode-extension/package.json').version")"
+          if [ "$cli_version" != "$ext_version" ]; then
+            echo "CLI VERSION $cli_version does not match extension $ext_version" >&2
+            exit 1
+          fi
+          case "$GITHUB_REF" in
+            refs/tags/v*) tag_version="${GITHUB_REF#refs/tags/v}" ;;
+            refs/tags/ext-v*) tag_version="${GITHUB_REF#refs/tags/ext-v}" ;;
+            *) tag_version="" ;;
+          esac
+          if [ -n "$tag_version" ] && [ "$tag_version" != "$cli_version" ]; then
+            echo "Tag version $tag_version does not match CLI/extension $cli_version" >&2
+            exit 1
+          fi
 
       - name: Run test suite
         run: bash test/run-tests.sh

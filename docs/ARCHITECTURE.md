@@ -21,6 +21,13 @@ The primary interface (D15/D17): a thin dispatcher over the engine
 scripts. Zero token cost, and works while rate-limited — when nothing
 needing a model turn can run.
 
+For CLI-only release awareness, interactive `status` and `doctor` calls invoke
+`update-check.sh`: a strict-semver, best-effort GitHub check cached for 24 hours
+in `~/.claude/auto-resume/update-check`. It only discovers releases; updating
+still requires an explicit `claude-standby update`. Non-TTY calls preserve
+stable output, failures are non-fatal, and neither the daemon nor the sensor
+ever invokes the checker.
+
 ### Sensor — status-line rate capture (`statusline.sh`)
 
 Claude Code streams live usage — `rate_limits.five_hour.{used_percentage,

@@ -22,7 +22,7 @@
 #
 # Setup & maintenance:
 #   setup-statusline | remove-statusline   opt-in: capture the exact reset time
-#   update  |  uninstall [--yes]  |  version
+#   update [--check]  |  uninstall [--yes]  |  version
 set -u
 
 ORIG0="$0"
@@ -58,6 +58,7 @@ AR_HOME_DIR="$(dirname "${CLAUDE_STANDBY_STATE:-$HOME/.claude/auto-resume/state.
 # never signal a PID that was merely reused for something unrelated.
 stop_workspace_daemons() {
   local dir="$1/daemons" p pid cmd stopped=0 failed=0 tries
+  local ps_bin="${CAR_PS_BIN:-ps}"
   [ -d "$dir" ] || return 0
   for p in "$dir"/*.pid; do
     [ -e "$p" ] || break
@@ -67,7 +68,7 @@ stop_workspace_daemons() {
       continue
     fi
     if kill -0 "$pid" 2>/dev/null; then
-      cmd="$(ps -p "$pid" -o command= 2>/dev/null || ps -p "$pid" -o args= 2>/dev/null)"
+      cmd="$("$ps_bin" -p "$pid" -o command= 2>/dev/null || "$ps_bin" -p "$pid" -o args= 2>/dev/null)"
       case "$cmd" in
         *daemon.sh*)
           kill "$pid" 2>/dev/null
@@ -123,7 +124,10 @@ if [ $# -gt 0 ]; then shift; fi
 
 case "$CMD" in
   status)
-    exec bash "$SCRIPTS_DIR/task-status.sh" ;;
+    bash "$SCRIPTS_DIR/task-status.sh"
+    RC=$?
+    bash "$SCRIPTS_DIR/update-check.sh" auto || true
+    exit "$RC" ;;
 
   start)
     exec bash "$SCRIPTS_DIR/task-start.sh" "$@" ;;
@@ -250,6 +254,7 @@ EOF
     else
       printf '  %-8s %-5s %s\n' "notify" "ok" "log-only (no desktop notifier found)"
     fi
+    bash "$SCRIPTS_DIR/update-check.sh" doctor || true
     exit "$RC" ;;
 
   setup-statusline)
@@ -259,6 +264,17 @@ EOF
     exec bash "$SCRIPTS_DIR/setup-statusline.sh" remove ;;
 
   update)
+    if [ "${1:-}" = "--check" ]; then
+      [ "$#" -eq 1 ] || {
+        echo "Usage: claude-standby update [--check]" >&2
+        exit 1
+      }
+      exec bash "$SCRIPTS_DIR/update-check.sh" force
+    fi
+    [ "$#" -eq 0 ] || {
+      echo "Usage: claude-standby update [--check]" >&2
+      exit 1
+    }
     # Updates are download-validate-swap via the installer (D36) — never
     # `git pull` into the live tree. A git checkout outside the managed
     # install dir is a development copy: hands off.

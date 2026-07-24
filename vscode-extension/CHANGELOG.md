@@ -4,6 +4,16 @@ All notable changes to the Claude Standby Cockpit extension. The
 extension is a thin UI over the `claude-standby` terminal tool, so some
 entries describe tool behavior the cockpit now surfaces.
 
+## 0.9.6
+
+- **CLI-only update awareness.** Interactive `claude-standby status` and
+  `doctor` now check GitHub at most once daily and report a newer engine
+  release. `claude-standby update --check` forces a comparison without
+  installing; installation remains explicit and uses the existing validated
+  swap. Daemons and sensors never make update-check requests.
+- CLI and extension versions remain aligned at 0.9.6. Extension publishing
+  continues through the documented manual Marketplace/Open VSX workflow.
+
 ## 0.9.5
 
 - **Headless resume no longer hangs at "resuming" (D47).** When the daemon

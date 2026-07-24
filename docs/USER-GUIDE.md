@@ -353,6 +353,16 @@ work (claude missing).
 Updates the install in place: downloads a fresh copy, sanity-checks it,
 then swaps it in (no git involved — a failed download never leaves a
 broken install). Prints a one-line summary (`Updated 0.6.0 → 0.7.0.`).
+`claude-standby update --check` forces a fresh release check and reports
+whether a newer version exists without installing it.
+
+For CLI-only users, interactive `status` and `doctor` commands also perform
+a best-effort release check at most once every 24 hours. `status` prints one
+short update notice per day; `doctor` includes an update health row. Checks
+use a 2-second maximum timeout, are silent/non-fatal when automatic, and are
+skipped for pipes, command substitutions, daemons, sensors, and development
+checkouts. Installation is never automatic.
+
 If the status-line sensor is registered it's quietly kept current; if it
 isn't, the update asks the same `[Y/n]` question as the installer — but
 only **once ever** (your answer is remembered, updates never nag; the
@@ -404,6 +414,7 @@ Optional config file: `~/.claude/auto-resume/config` (plain shell,
 |---|---|---|---|
 | `AR_CFG_CLAUDE_BIN` | `CLAUDE_STANDBY_CLAUDE_BIN` | `claude` | Binary the daemon invokes to resume |
 | `AR_CFG_EXTRA_ARGS` | `CLAUDE_STANDBY_EXTRA_ARGS` | *(empty)* | Extra CLI args appended to the resume command (word-split) |
+| `AR_CFG_UPDATE_CHECK` | `CLAUDE_STANDBY_UPDATE_CHECK` | `1` | Automatic interactive release checks (`0`, `false`, `no`, or `off` disables). Explicit `update --check` still runs |
 | — | `CLAUDE_STANDBY_STATE` | `~/.claude/auto-resume/state.json` | State file location |
 | — | `AR_DAEMON_TICK_SECS` | `60` | Daemon wake interval |
 | — | `AR_NORMAL_GRACE_SECS` | `300` | `normal` tier confirmation window (notify → wait → resume, so you can cancel) |
@@ -437,6 +448,7 @@ you.
 | `~/.claude/auto-resume/state.json` | All task state. Human-readable JSON; safe to inspect, edited only via the commands. |
 | `~/.claude/auto-resume/logs/plugin.log` | Timestamped log of everything: daemon ticks, probes, resume attempts, errors. First stop when debugging. |
 | `~/.claude/auto-resume/rate.json` | Exact reset snapshot (`resets_at`, `used_percentage`) written by the optional status-line sensor; read by auto mode. Absent unless `setup-statusline` is installed (a `/tmp` cache may be used instead — see §3). |
+| `~/.claude/auto-resume/update-check` | Owner-only cache for the at-most-daily GitHub release check; contains timestamps and public version numbers only. Never sourced as shell |
 | `~/.claude/auto-resume/daemons/*.pid` | One pidfile per waiting workspace; auto-removed when the daemon exits. |
 | `~/.claude/auto-resume/config` | Optional configuration (see above). |
 

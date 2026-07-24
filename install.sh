@@ -172,7 +172,8 @@ install_tree() {
   # Assert the key files exist and are non-empty, so a truncated-but-parseable
   # download can't replace a working install with an incomplete tree.
   for req in bin/claude-standby VERSION plugin/scripts/lib.sh \
-             plugin/scripts/daemon.sh plugin/scripts/statusline.sh; do
+             plugin/scripts/daemon.sh plugin/scripts/statusline.sh \
+             plugin/scripts/update-check.sh; do
     if [ ! -s "$STAGE/$req" ]; then
       rm -rf "$STAGE"
       die "downloaded copy is incomplete ($req missing) — install left untouched"
@@ -230,6 +231,7 @@ car_installed_version() {
 # never signal a PID that was merely reused for something unrelated.
 stop_workspace_daemons() {
   DIR="$1/daemons"
+  PS_BIN="${CAR_PS_BIN:-ps}"
   [ -d "$DIR" ] || return 0
   STOPPED=0; FAILED=0
   for p in "$DIR"/*.pid; do
@@ -240,7 +242,7 @@ stop_workspace_daemons() {
       continue
     fi
     if kill -0 "$pid" 2>/dev/null; then
-      cmd="$(ps -p "$pid" -o command= 2>/dev/null || ps -p "$pid" -o args= 2>/dev/null)"
+      cmd="$("$PS_BIN" -p "$pid" -o command= 2>/dev/null || "$PS_BIN" -p "$pid" -o args= 2>/dev/null)"
       case "$cmd" in
         *daemon.sh*)
           kill "$pid" 2>/dev/null
@@ -278,8 +280,26 @@ stop_workspace_daemons() {
 SETTINGS_FILE="${CLAUDE_SETTINGS_FILE:-$HOME/.claude/settings.json}"
 AR_DATA="$(dirname "${CLAUDE_STANDBY_STATE:-$HOME/.claude/auto-resume/state.json}")"
 SENSOR_MARKER="$AR_DATA/statusline-offered"
+UPDATE_CACHE="${CLAUDE_STANDBY_UPDATE_CACHE:-$AR_DATA/update-check}"
 sensor_on() { grep -qs "plugin/scripts/statusline.sh" "$SETTINGS_FILE"; }
 mark_offered() { mkdir -p "$AR_DATA" 2>/dev/null && : > "$SENSOR_MARKER"; }
+seed_update_cache() {
+  # A successful install/update already knows this local version is the latest
+  # artifact it fetched. Seed the discovery cache so the next interactive
+  # `status` does not immediately make a redundant GitHub request.
+  CACHE_VER="$1"
+  case "$CACHE_VER" in ''|*[!0-9.]*) return 0 ;; esac
+  CACHE_TMP="${UPDATE_CACHE}.tmp.$$"
+  ( umask 077
+    mkdir -p "$(dirname "$UPDATE_CACHE")" 2>/dev/null || exit 0
+    chmod 700 "$(dirname "$UPDATE_CACHE")" 2>/dev/null || true
+    printf 'checked_at=%s\nlatest_version=%s\nnotified_at=0\nnotified_version=\nresult=ok\n' \
+      "$(date +%s)" "$CACHE_VER" > "$CACHE_TMP"
+    chmod 600 "$CACHE_TMP" 2>/dev/null || true
+    mv "$CACHE_TMP" "$UPDATE_CACHE" 2>/dev/null || rm -f "$CACHE_TMP" 2>/dev/null
+    chmod 600 "$UPDATE_CACHE" 2>/dev/null || true
+  ) 2>/dev/null || true
+}
 offer_sensor() {
   SENSOR_MODE="${CAR_SETUP_STATUSLINE:-ask}"
   [ "$SENSOR_MODE" = "no" ] && return 0
@@ -354,6 +374,7 @@ if [ "${1:-}" = "--update" ]; then
   else
     say "Updated ${OLD_VER:-?} → ${NEW_VER:-?}."
   fi
+  seed_update_cache "$NEW_VER"
   # Updates reach users the fresh installer never sees (D42): refresh a
   # registered sensor, or offer it ONE time — never nag on every update.
   offer_sensor once
@@ -384,6 +405,7 @@ if [ -e "$LINK" ] && [ ! -L "$LINK" ]; then
 fi
 ln -sf "$INSTALL_DIR/bin/claude-standby" "$LINK"
 VER="$(car_installed_version)"
+seed_update_cache "$VER"
 
 # "Linked" line kept for scripts/tests that look for it; kept terse.
 say "Linked → $LINK"

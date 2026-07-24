@@ -1103,3 +1103,29 @@ tree had to be force-killed by hand. Lower priority now that fix #1 prevents
 the hang that made cancel-of-a-hung-resume necessary; to be fixed with a
 fake-claude repro (a resume child that ignores the daemon's signal) in a
 follow-up. No state.json schema change in 0.9.5.
+
+## D48 — 2026-07-24 — CLI-only users get cached update awareness, never silent installs
+
+**Problem.** The engine/CLI is the primary interface, but only the optional
+cockpit checked for newer releases. A CLI-only user could safely run
+`claude-standby update` yet had no product-native way to learn that an update
+existed.
+
+**Decision.** Add `update-check.sh` and `claude-standby update --check`.
+Interactive `status` and `doctor` check the official GitHub latest-release API
+at most once per 24 hours. `status` prints one actionable notice per interval;
+`doctor` renders update health. Non-TTY calls keep stable output, automatic
+failures never affect command health, and `AR_CFG_UPDATE_CHECK=0` opts out.
+Explicit `update --check` bypasses both the cache and opt-out because it is a
+direct user request.
+
+Discovery never installs. The existing download-validate-swap `update` remains
+the only install action. The response and owner-only key/value cache are never
+sourced or executed; only strict `v?MAJOR.MINOR.PATCH` values are accepted.
+Checks have a one-second connect/two-second total timeout and are never called
+by the daemon or status-line sensor. No state schema change: update metadata is
+host-local maintenance state at `~/.claude/auto-resume/update-check`.
+
+**Release.** CLI and cockpit move together to 0.9.6, with the normal test CI
+enforcing version equality. Extension publication remains the owner's manual
+Marketplace/Open VSX process; no CI publishing dependency is introduced.

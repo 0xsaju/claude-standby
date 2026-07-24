@@ -9,8 +9,8 @@ session with context, and never makes you babysit a terminal again.
 
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey)
-![Version](https://img.shields.io/badge/version-0.9.4-informational)
-![Tests](https://img.shields.io/badge/tests-286%20passing-brightgreen)
+![Version](https://img.shields.io/badge/version-0.9.6-informational)
+![Tests](https://img.shields.io/badge/tests-398%20passing-brightgreen)
 ![Status](https://img.shields.io/badge/status-alpha-orange)
 [![VS Marketplace](https://img.shields.io/badge/VS_Marketplace-Install-0066b8?logo=visualstudiocode&logoColor=white)](https://marketplace.visualstudio.com/items?itemName=0xsaju.claude-standby-cockpit)
 [![Open VSX](https://img.shields.io/badge/Open_VSX-Install-a60ee5)](https://open-vsx.org/extension/0xsaju/claude-standby-cockpit)
@@ -69,6 +69,7 @@ the moment resuming is possible.
 | **Suspend-safe** | The daemon compares wall-clock time on 60-second ticks — a closed lid delays nothing. |
 | **Context-aware resume** | The resumed conversation already carries its full context (`claude --resume`), so it continues instead of starting over — no re-priming needed. Point a custom `--prompt` at a progress/handoff file for even more reliable pickups. |
 | **Safety rails** | Bounded retries, backoff when a resume bounces off a still-active limit, instant cancel (kills in-flight work), no dangerous permission flags unless you opt in. |
+| **Update-aware CLI** | Interactive `status` and `doctor` check for a new release at most once a day and print one actionable notice. No silent installs; no network calls from the daemon or sensor. |
 | **Honest by design** | Detection is built from *measured* behavior, never guessed message formats. Weekly caps can't be beaten, and the docs say so. |
 
 ## Installation
@@ -90,6 +91,7 @@ The tool manages itself from then on:
 
 ```sh
 claude-standby update       # get the latest version (download + swap)
+claude-standby update --check # check without installing
 claude-standby doctor       # verify the whole environment
 claude-standby uninstall    # remove cleanly (keeps your task state)
 ```
@@ -149,7 +151,7 @@ Tip: `alias cs='claude-standby'`.
 | `log [n]` / `watch` | Show / follow the log. |
 | `doctor` | Full environment self-check. |
 | `setup-statusline` / `remove-statusline` | Opt-in: capture the exact reset time from your status line for exact-reset detection (chains any existing status line). |
-| `update` / `uninstall` / `version` | Tool management. |
+| `update [--check]` / `uninstall` / `version` | Tool management. `--check` compares versions without installing; interactive `status`/`doctor` also check at most daily. |
 
 Full reference with examples: **[User Guide](docs/USER-GUIDE.md)**.
 
@@ -158,9 +160,10 @@ Full reference with examples: **[User Guide](docs/USER-GUIDE.md)**.
 One small engine behind `state.json`, fed by data Claude Code already
 produces. We run no server of our own and the daemon's own loop is nothing
 but local file reads and a wall-clock check — no custom polling service, no
-scraping. Two things do reach the network by design: the probe fallback
-runs a real (tiny) `claude` call, which talks to Anthropic like any other
-Claude Code invocation, and the VS Code cockpit checks GitHub for extension
+scraping. Three things do reach the network by design: the probe fallback
+runs a real (tiny) `claude` call to Anthropic; interactive CLI `status` and
+`doctor` make a cached, at-most-daily GitHub release check; and the VS Code
+cockpit performs its own update check. Daemons and sensors never check for
 updates. The rest of the flow, from the limit to the resumed conversation:
 
 ```mermaid
